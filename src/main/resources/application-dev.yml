@@ -1,14 +1,13 @@
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/mydb
-    username: myuser
-    password: mypassword
+    url: jdbc:postgresql://localhost:5432/back?reWriteBatchedInserts=true
+    username: back
+    password: back1234
     driver-class-name: org.postgresql.Driver
 
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: create
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
-

@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [ dev ]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      # ✅ Spotless 검사
+      - name: Run Spotless Check
+        run: ./gradlew spotlessCheck
+
+      - name: Build and Test
+        run: ./gradlew build
+
+      - name: Discord 알림 (CI 실패)
+        if: failure()
+        run: |
+          curl -s -H "Content-Type: application/json" \
+            -d "{\"embeds\":[{\"title\":\"CI 빌드 실패 ❌\",\"description\":\"**브랜치**: ${{ github.head_ref }}\\n**PR**: ${{ github.event.pull_request.title }}\\n**커밋**: ${{ github.sha }}\",\"color\":15158332}]}" \
+            ${{ secrets.DISCORD_WEBHOOK_URL }}

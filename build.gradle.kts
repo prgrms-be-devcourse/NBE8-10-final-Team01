@@ -2,6 +2,7 @@ plugins {
     java
     id("org.springframework.boot") version "3.5.11"
     id("io.spring.dependency-management") version "1.1.7"
+    id("com.diffplug.spotless") version "8.1.0"
 }
 
 group = "com"
@@ -11,6 +12,35 @@ description = "NBE8-10-final-Team01"
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+spotless {
+    java {
+        target(
+            "src/main/java/**/*.java",
+            "src/test/java/**/*.java"
+        )
+
+        palantirJavaFormat()
+        removeUnusedImports()
+        trimTrailingWhitespace()
+        endWithNewline()
+        formatAnnotations()
+
+        importOrder("java", "javax", "org", "com", "")
+    }
+
+    format("yaml") {
+        target("**/*.yml", "**/*.yaml")
+        trimTrailingWhitespace()
+        endWithNewline()
+    }
+
+    format("misc") {
+        target("*.gradle", "*.gradle.kts", "*.md", ".gitignore")
+        trimTrailingWhitespace()
+        endWithNewline()
     }
 }
 
