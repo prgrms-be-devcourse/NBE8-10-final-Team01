@@ -1,22 +1,60 @@
-# Code Review Style Guide
+# Gemini Code Review Style Guide
 
-## Core principles
-- Prioritize correctness, security, and regression risk.
-- Avoid low-value style nitpicks unless they hide a real risk.
-- Prefer concise, actionable comments with concrete fixes.
+## 기본 원칙
+- 모든 리뷰 코멘트는 한국어로 작성한다.
+- 리뷰는 인라인 코멘트 중심으로 작성한다.
+- 별도 요약 코멘트는 꼭 필요한 경우가 아니면 작성하지 않는다.
+- 정확성, 보안, 회귀 위험을 우선해서 지적한다.
+- 각 코멘트 첫 줄에 심각도 라벨을 붙인다.
+- 문장이 길어지면 문단을 나눠 가독성을 높인다.
 
-## Severity rubric
-- HIGH: bugs, security issues, data loss, broken behavior
-- MEDIUM: maintainability issues likely to cause bugs soon
-- LOW: optional improvements with clear value
+## 심각도 기준
+- CRITICAL: 배포 차단급 문제(보안 취약점, 데이터 손실, 서비스 중단 가능성)
+- HIGH: 버그, 보안 취약점, 데이터 손실, 기능 오동작
+- MEDIUM: 단기적으로 버그로 이어질 가능성이 큰 유지보수 문제
+- LOW: 선택적 개선 사항(가능하면 코멘트 생략)
 
-## What to focus on
-- Null safety and error handling
-- Boundary conditions and off-by-one mistakes
-- Query and API misuse that can fail in production
-- Missing tests for changed logic
+## 심각도 표기 형식(색상 대체)
+- CRITICAL: `🔴 [CRITICAL]`
+- HIGH: `🟠 [HIGH]`
+- MEDIUM: `🟡 [MEDIUM]`
+- LOW: `🟢 [LOW]`
+- 코멘트는 아래 형식을 기본으로 사용한다.
 
-## What to avoid
-- Pure style-only comments with no impact
-- Repeating comments on the same root cause
-- Suggesting large refactors outside PR scope
+```text
+🟠 HIGH
+
+내용: null 처리 누락으로 NPE가 발생할 수 있습니다.
+근거: user.email이 null일 때 trim() 호출에서 예외가 발생합니다.
+제안: user.email?.trim() ?: "" 형태로 가드 처리해 주세요.
+```
+
+- `중요도`와 `내용`사이에는 빈 줄 1개를 둔다.
+- 한 문단은 1~2문장으로 짧게 유지한다.
+- `제안`은 가능한 경우에만 추가한다.
+
+## 좋은 코멘트 예시
+```text
+🟠 HIGH
+
+내용: null 처리 누락으로 NPE가 발생할 수 있습니다.
+근거: user.email이 null일 때 trim() 호출에서 예외가 발생합니다.
+제안: user.email?.trim() ?: "" 형태로 가드 처리해 주세요.
+```
+
+## 집중해서 볼 항목
+- null 안정성, 예외 처리 누락
+- 경계값/오프바이원 실수
+- API/쿼리 오용으로 인한 런타임 실패 위험
+- 변경 로직 대비 테스트 누락
+- 동시성/중복 처리 문제
+- 상태 전이 로직의 일관성
+- 트랜잭션 경계 적절성
+- 외부 연동 실패 대응
+- 성능/N+1/불필요한 조회
+- 보안/권한 검증
+
+## 피해야 할 항목
+- 영향 없는 스타일 지적만 하는 코멘트
+- 같은 원인을 반복 지적하는 중복 코멘트
+- 현재 PR 범위를 벗어나는 대규모 리팩터 제안

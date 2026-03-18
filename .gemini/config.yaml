@@ -1,18 +1,29 @@
+# Gemini 응답 톤을 장난스럽게 만들지 않음
 have_fun: false
 
+# 장기 메모리 사용 비활성화(레포/PR 단위 맥락에 집중)
 memory_config:
   disabled: true
 
 code_review:
+  # 코드리뷰 기능 on/off 스위치
   disable: false
+  # 심각도 4단계(CRITICAL/HIGH/MEDIUM/LOW) 중,
+  # 이 값 이상만 코멘트 생성(MEDIUM이면 LOW 제외)
   comment_severity_threshold: MEDIUM
-  max_review_comments: 8
+  # PR 하나에서 생성할 최대 코멘트 수
+  max_review_comments: 3
   pull_request_opened:
+    # '/gemini' 사용 가이드 코멘트 비활성화
     help: false
-    summary: true
+    # 별도 요약 코멘트 비활성화(중복 방지)
+    summary: false
+    # PR 오픈 시 코드리뷰 코멘트 생성 활성화
     code_review: true
+  # Draft PR은 자동 리뷰하지 않음
   include_drafts: false
 
+# 자동 리뷰에서 제외할 파일/경로 패턴
 ignore_patterns:
   - "**/*.lock"
   - "**/build/**"
