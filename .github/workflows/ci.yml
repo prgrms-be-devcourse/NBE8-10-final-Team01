@@ -1,0 +1,79 @@
+name: CI
+
+# =========================
+# 전역 환경변수
+# =========================
+env:
+  IMAGE_REPOSITORY: nbe8-10-final-team01  # GHCR 이미지명 (소문자 필수)
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}  # 같은 브랜치에 커밋 몰려도 최신만 실행
+  cancel-in-progress: false                         # 진행 중인 빌드는 끝날 때까지 대기
+
+on:
+  push:
+    paths:
+      - ".github/workflows/**"
+      - "src/**"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "Dockerfile"
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: write   # 태그/릴리즈
+  packages: write   # GHCR 푸시
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # ---------------------------------------------------------
+  # 1) 다음 버전 계산 (dry-run, 태그 생성 X)
+  # ---------------------------------------------------------
+  calculateTag:
+    runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.dry_run.outputs.new_tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 다음 버전 태그 계산 (dry-run)
+        id: dry_run
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          dry_run: true
+
+  # ---------------------------------------------------------
+  # 2) Docker 빌드 (테스트 포함) & GHCR 푸시
+  # ---------------------------------------------------------
+  buildAndPush:
+    needs: calculateTag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: GHCR 로그인
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker Buildx 설정
+        uses: docker/setup-buildx-action@v3
+
+      - name: 빌드 및 GHCR 푸시
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_REPOSITORY }}:${{ needs.calculateTag.outputs.tag_name }}
+            ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_REPOSITORY }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

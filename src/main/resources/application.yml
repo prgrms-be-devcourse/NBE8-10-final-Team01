@@ -1,0 +1,16 @@
+spring:
+  application:
+    name: NBE8-10-final-Team01
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/algo_db
+    username: algo_user
+    password: algo_pass
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
