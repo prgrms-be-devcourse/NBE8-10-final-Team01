@@ -1,7 +1,11 @@
 spring:
+  datasource:
+    url: jdbc:tc:pgvector:pg16:///test_db
+    driver-class-name: org.testcontainers.jdbc.ContainerDatabaseDriver
+
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: create-drop
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
