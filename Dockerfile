@@ -5,12 +5,17 @@
 # pgvector/pgvector:pg16 — pgvector 포함 커스텀 이미지
 FROM pgvector/pgvector:pg16 AS builder
 
-# OpenJDK 21 설치 (Gradle은 gradlew 사용)
+# Eclipse Temurin 21 설치 (bookworm 기본 repo에 openjdk-21 없음 → 바이너리 직접 다운로드)
 RUN apt-get update \
- && apt-get install -y --no-install-recommends openjdk-21-jdk \
+ && apt-get install -y --no-install-recommends curl \
+ && curl -sL "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.5%2B11/OpenJDK21U-jdk_x64_linux_hotspot_21.0.5_11.tar.gz" \
+    -o /tmp/jdk21.tar.gz \
+ && tar xz -C /opt -f /tmp/jdk21.tar.gz \
+ && mv "/opt/jdk-21.0.5+11" /opt/java \
+ && rm /tmp/jdk21.tar.gz \
  && rm -rf /var/lib/apt/lists/*
 
-ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+ENV JAVA_HOME=/opt/java
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
 
 WORKDIR /app
