@@ -1,6 +1,7 @@
 package com.back.domain.tag.tag.entity;
 
 import com.back.global.jpa.entity.BaseEntity;
+
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;

@@ -3,6 +3,7 @@ package com.back.domain.tag.problemtagconnect.entity;
 import com.back.domain.problem.problem.entity.Problem;
 import com.back.domain.tag.tag.entity.Tag;
 import com.back.global.jpa.entity.BaseEntity;
+
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;

@@ -2,6 +2,7 @@ package com.back.domain.problem.testcase.entity;
 
 import com.back.domain.problem.problem.entity.Problem;
 import com.back.global.jpa.entity.BaseEntity;
+
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;

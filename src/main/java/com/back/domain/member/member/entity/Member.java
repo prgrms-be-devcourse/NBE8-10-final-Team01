@@ -2,6 +2,7 @@ package com.back.domain.member.member.entity;
 
 import com.back.global.enums.Role;
 import com.back.global.jpa.entity.BaseEntity;
+
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
