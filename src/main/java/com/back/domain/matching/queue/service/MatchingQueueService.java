@@ -15,6 +15,7 @@ import com.back.domain.matching.queue.model.WaitingUser;
 @Service
 public class MatchingQueueService {
 
+    // TODO: 지금 현재 인메모리 방식임 redis로 전환하면 좋음 MVP 이기 때문
     /**
      * 카테고리 + 난이도별 대기열
      *
