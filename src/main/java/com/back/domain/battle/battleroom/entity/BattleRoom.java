@@ -31,6 +31,6 @@ public class BattleRoom extends BaseEntity {
     private Integer maxPlayers;
     private LocalDateTime timerEnd;
 
-    @OneToMany(mappedBy = "battleRoom")
+    @OneToMany(mappedBy = "battleRoom", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<BattleParticipant> participants = new ArrayList<>();
 }
