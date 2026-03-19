@@ -29,7 +29,9 @@ public class BattleParticipant extends BaseEntity {
     @JoinColumn(name = "user_id")
     private Member member;
 
-    private String status; // READY, PLAYING, EXIT
+    @Enumerated(EnumType.STRING)
+    private BattleParticipantStatus status; // READY, PLAYING, EXIT
+
     private Integer finalRank;
     private Long scoreDelta; // 이 판으로 변동된 점수
 
