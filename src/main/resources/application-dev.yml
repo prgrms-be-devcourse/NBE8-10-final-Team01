@@ -1,9 +1,9 @@
 spring:
   datasource:
     # 팀 로컬 기본값은 docker-compose.yml과 동일하게 유지한다.
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:back}?reWriteBatchedInserts=true
-    username: ${DB_USERNAME:back}
-    # 비밀번호는 .env/IDE 환경변수에서 반드시 주입한다.
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME}?reWriteBatchedInserts=true
+    username: ${DB_USERNAME}
+    # 비밀번호는 .env/IDE 환경변수에서 주입한다.
     password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
 
