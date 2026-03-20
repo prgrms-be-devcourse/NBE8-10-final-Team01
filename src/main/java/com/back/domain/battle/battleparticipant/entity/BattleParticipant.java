@@ -30,10 +30,32 @@ public class BattleParticipant extends BaseEntity {
     private Member member;
 
     @Enumerated(EnumType.STRING)
-    private BattleParticipantStatus status; // READY, PLAYING, EXIT
+    private BattleParticipantStatus status;
 
     private Integer finalRank;
     private Long scoreDelta; // 이 판으로 변동된 점수
-
     private LocalDateTime finishTime; // 문제를 다 푼 시각
+
+    public static BattleParticipant create(BattleRoom battleRoom, Member member) {
+        BattleParticipant participant = new BattleParticipant();
+        participant.battleRoom = battleRoom;
+        participant.member = member;
+        participant.status = BattleParticipantStatus.READY;
+        participant.scoreDelta = 0L;
+        return participant;
+    }
+
+    public void join() {
+        this.status = BattleParticipantStatus.PLAYING;
+    }
+
+    public void complete(LocalDateTime finishTime) {
+        this.status = BattleParticipantStatus.EXIT;
+        this.finishTime = finishTime;
+    }
+
+    public void applyResult(int rank, long delta) {
+        this.finalRank = rank;
+        this.scoreDelta = delta;
+    }
 }
