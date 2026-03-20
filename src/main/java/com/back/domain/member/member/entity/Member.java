@@ -7,13 +7,11 @@ import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.RequiredArgsConstructor;
 
 @Entity
 @Table(name = "members")
 @Getter // 데이터를 꺼내오기 위해 필수!
 @NoArgsConstructor(access = AccessLevel.PROTECTED) // JPA용 기본 생성자
-@RequiredArgsConstructor
 public class Member extends BaseEntity {
 
     @Id
