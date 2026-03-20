@@ -21,13 +21,19 @@ public class Problem extends BaseEntity {
     @SequenceGenerator(name = "problem_seq_gen", sequenceName = "problem_id_seq", allocationSize = 50)
     private Long id;
 
+    @Column(nullable = false)
     private String title;
+
+    @Column(nullable = false)
     private String difficulty;
 
-    @Column(columnDefinition = "TEXT")
+    @Column(columnDefinition = "TEXT", nullable = false)
     private String content;
 
+    @Column(nullable = false)
     private Long timeLimitMs;
+
+    @Column(nullable = false)
     private Long memoryLimitMb;
 
     @OneToMany(mappedBy = "problem")
