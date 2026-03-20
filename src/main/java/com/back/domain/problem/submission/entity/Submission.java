@@ -34,4 +34,19 @@ public class Submission extends BaseEntity {
     private String result; // AC, WA, TLE 등
     private Integer passedCount;
     private Integer totalCount;
+
+    public static Submission create(BattleRoom battleRoom, Member member, String code, String language) {
+        Submission submission = new Submission();
+        submission.battleRoom = battleRoom;
+        submission.member = member;
+        submission.code = code;
+        submission.language = language;
+        return submission;
+    }
+
+    public void applyJudgeResult(String result, int passedCount, int totalCount) {
+        this.result = result;
+        this.passedCount = passedCount;
+        this.totalCount = totalCount;
+    }
 }
