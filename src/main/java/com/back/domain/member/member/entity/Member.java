@@ -40,6 +40,7 @@ public class Member extends BaseEntity {
         this.nickname = nickname;
         this.email = email;
         this.password = encodedPassword;
+        this.role = Role.USER;
     }
 
     public static Member createUser(String nickname, String email, String encodedPassword) {
