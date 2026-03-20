@@ -3,8 +3,6 @@ package com.back.domain.matching.queue.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.lang.reflect.Field;
-
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -18,7 +16,7 @@ class MatchingQueueServiceTest {
 
     @Test
     @DisplayName("사용자는 카테고리와 난이도를 선택해 매칭 대기열에 참가할 수 있다")
-    void joinQueue_success() throws Exception {
+    void joinQueue_success() {
         // given
         Long userId = 1L;
         QueueJoinRequest request = createRequest("Array", Difficulty.EASY);
@@ -35,7 +33,7 @@ class MatchingQueueServiceTest {
 
     @Test
     @DisplayName("이미 대기열에 참가 중인 사용자는 중복 참가할 수 없다")
-    void joinQueue_fail_whenAlreadyJoined() throws Exception {
+    void joinQueue_fail_whenAlreadyJoined() {
         // given
         Long userId = 1L;
         QueueJoinRequest request = createRequest("Array", Difficulty.EASY);
@@ -48,21 +46,7 @@ class MatchingQueueServiceTest {
                 .hasMessage("이미 매칭 대기열에 참가 중인 사용자입니다.");
     }
 
-    /**
-     * QueueJoinRequest는 현재 기본 생성자만 있고 setter가 없으므로
-     * 테스트에서는 reflection으로 필드 값을 넣는다.
-     */
-    private QueueJoinRequest createRequest(String category, Difficulty difficulty) throws Exception {
-        QueueJoinRequest request = new QueueJoinRequest();
-
-        Field categoryField = QueueJoinRequest.class.getDeclaredField("category");
-        categoryField.setAccessible(true);
-        categoryField.set(request, category);
-
-        Field difficultyField = QueueJoinRequest.class.getDeclaredField("difficulty");
-        difficultyField.setAccessible(true);
-        difficultyField.set(request, difficulty);
-
-        return request;
+    private QueueJoinRequest createRequest(String category, Difficulty difficulty) {
+        return new QueueJoinRequest(category, difficulty);
     }
 }

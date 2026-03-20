@@ -4,11 +4,12 @@ import com.back.domain.matching.queue.model.Difficulty;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 /**
- * 큐 참가 요청 DTO
+ * 매칭 시작 요청 DTO
  *
  * 예:
  * {
@@ -18,6 +19,7 @@ import lombok.NoArgsConstructor;
  */
 @Getter
 @NoArgsConstructor
+@AllArgsConstructor
 public class QueueJoinRequest {
 
     @NotBlank(message = "카테고리는 필수입니다.") private String category;
