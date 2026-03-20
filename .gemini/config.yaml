@@ -7,7 +7,7 @@ memory_config:
 
 code_review:
   # 코드리뷰 기능 on/off 스위치
-  disable: true
+  disable: false
   # 심각도 4단계(CRITICAL/HIGH/MEDIUM/LOW) 중,
   # 이 값 이상만 코멘트 생성(MEDIUM이면 LOW 제외)
   comment_severity_threshold: MEDIUM
