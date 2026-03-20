@@ -17,6 +17,7 @@ cd "$(git rev-parse --show-toplevel)" && cp .env.example .env
 ## 1) PostgreSQL 실행 (Docker Compose)
 
 주의: 실행 전에 docker desktop이 켜져 있어야 합니다.
+로컬 컨테이너 이미지는 `pgvector/pgvector:pg16`을 사용합니다.
 
 ```bash
 cd "$(git rev-parse --show-toplevel)" && docker compose up -d postgres
@@ -27,6 +28,7 @@ cd "$(git rev-parse --show-toplevel)" && docker compose ps
 - 기본 DB: `back`
 - 기본 계정: `DB_USERNAME / DB_PASSWORD`
 - 실제 값은 `.env`를 따릅니다.
+- DB 최초 초기화 시 `vector` extension이 자동 생성됩니다.
 
 ## 2) Spring Boot 실행 (스키마 반영)
 
@@ -125,6 +127,12 @@ limit 20;
 - `null value in column "id" ... violates not-null constraint`
   - 원인: 스키마 생성이 덜 되었거나 로더 실행 시점에 시퀀스를 찾지 못한 경우
   - 조치: `BackApplication`을 먼저 1회 실행 후 로더를 다시 실행
+
+- `type "vector" does not exist`
+  - 원인: 기존 볼륨(이전 postgres 이미지)으로 실행 중이어서 pgvector extension이 아직 없는 경우
+  - 조치: 아래 중 하나를 수행
+    - `docker compose exec postgres psql -U "$DB_USERNAME" -d "$DB_NAME" -c "CREATE EXTENSION IF NOT EXISTS vector;"`
+    - 또는 개발용이면 `docker compose down -v` 후 다시 `docker compose up -d postgres`로 볼륨을 재초기화
 
 - 현재 폴더가 `docs`이면 아래처럼 실행해도 됩니다.
 

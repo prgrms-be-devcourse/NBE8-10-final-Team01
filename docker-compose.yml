@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     restart: unless-stopped
     environment:
       # Spring dev 프로필과 로더 스크립트 기본값을 이 값과 맞춘다.
@@ -13,6 +13,8 @@ services:
       - "${DB_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      # DB 최초 초기화 시 pgvector extension을 자동 생성한다.
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-back} -d ${DB_NAME:-back}"]
       interval: 5s
