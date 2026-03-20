@@ -1,8 +1,8 @@
 package com.back.global.exception;
 
-import lombok.Getter;
-
 import com.back.global.rsData.RsData;
+
+import lombok.Getter;
 
 @Getter
 public class ServiceException extends RuntimeException {

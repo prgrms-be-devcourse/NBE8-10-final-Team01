@@ -1,12 +1,14 @@
 package com.back.global.aspect;
 
-import com.back.global.rsData.RsData;
-import jakarta.servlet.http.HttpServletResponse;
-import lombok.RequiredArgsConstructor;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
 import org.springframework.stereotype.Component;
+
+import com.back.global.rsData.RsData;
+
+import jakarta.servlet.http.HttpServletResponse;
+import lombok.RequiredArgsConstructor;
 
 @Aspect
 @Component
@@ -15,15 +17,13 @@ public class ResponseAspect {
 
     private final HttpServletResponse response;
 
-    @Around(
-            "execution(public com.back.global.rsData.RsData *(..)) && " +
-                    "(within(@org.springframework.stereotype.Controller *) || within(@org.springframework.web.bind.annotation.RestController *)) && " +
-                    "(@annotation(org.springframework.web.bind.annotation.GetMapping) || " +
-                    "@annotation(org.springframework.web.bind.annotation.PostMapping) || " +
-                    "@annotation(org.springframework.web.bind.annotation.PutMapping) || " +
-                    "@annotation(org.springframework.web.bind.annotation.DeleteMapping) || " +
-                    "@annotation(org.springframework.web.bind.annotation.RequestMapping))"
-    )
+    @Around("execution(public com.back.global.rsData.RsData *(..)) && "
+            + "(within(@org.springframework.stereotype.Controller *) || within(@org.springframework.web.bind.annotation.RestController *)) && "
+            + "(@annotation(org.springframework.web.bind.annotation.GetMapping) || "
+            + "@annotation(org.springframework.web.bind.annotation.PostMapping) || "
+            + "@annotation(org.springframework.web.bind.annotation.PutMapping) || "
+            + "@annotation(org.springframework.web.bind.annotation.DeleteMapping) || "
+            + "@annotation(org.springframework.web.bind.annotation.RequestMapping))")
     public Object handleResponse(ProceedingJoinPoint pjp) throws Throwable {
         // 1. 실제 컨트롤러 메서드 실행
         Object result = pjp.proceed();
