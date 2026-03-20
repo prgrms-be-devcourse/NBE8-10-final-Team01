@@ -2,6 +2,8 @@ package com.back.global.exception;
 
 import lombok.Getter;
 
+import com.back.global.rsData.RsData;
+
 @Getter
 public class ServiceException extends RuntimeException {
     private final String resultCode;
@@ -17,6 +19,10 @@ public class ServiceException extends RuntimeException {
         super(resultCode + " : " + msg, cause);
         this.resultCode = resultCode;
         this.msg = msg;
+    }
+
+    public RsData<Void> getRsData() {
+        return RsData.of(resultCode, msg);
     }
 
     public String getLocation() {
