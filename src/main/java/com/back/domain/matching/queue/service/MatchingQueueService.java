@@ -93,10 +93,8 @@ public class MatchingQueueService {
             throw new IllegalStateException("대기열에서 사용자를 제거하지 못했습니다.");
         }
 
-        // 8. 큐가 비었으면 waitingQueues에서도 제거
-        if (queue.isEmpty()) {
-            waitingQueues.remove(queueKey);
-        }
+        // 8. 해당 큐가 비어 있으면 삭제하고, 안 비어 있으면 그대로 둬라
+        waitingQueues.computeIfPresent(queueKey, (key, q) -> q.isEmpty() ? null : q);
 
         // 9. 응답 반환
         return new QueueStatusResponse(
