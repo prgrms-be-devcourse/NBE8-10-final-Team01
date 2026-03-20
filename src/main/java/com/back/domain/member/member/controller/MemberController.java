@@ -11,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import com.back.domain.member.member.dto.JoinRequest;
 import com.back.domain.member.member.service.MemberService;
 import com.back.global.response.ApiResponse;
+import com.back.global.rsData.RsData;
 
 @RestController
 @RequiredArgsConstructor
@@ -20,8 +21,8 @@ public class MemberController {
 
     // 회원가입
     @PostMapping("/join")
-    public ResponseEntity<ApiResponse> join(@RequestBody JoinRequest req) {
-        ApiResponse res = memberService.join(req);
-        return ResponseEntity.ok(res);
+    public RsData<Void> join(@RequestBody JoinRequest req) {
+        RsData<Void> res = memberService.join(req);
+        return res;
     }
 }

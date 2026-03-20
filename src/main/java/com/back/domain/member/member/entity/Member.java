@@ -7,11 +7,13 @@ import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.RequiredArgsConstructor;
 
 @Entity
 @Table(name = "members")
 @Getter // 데이터를 꺼내오기 위해 필수!
 @NoArgsConstructor(access = AccessLevel.PROTECTED) // JPA용 기본 생성자
+@RequiredArgsConstructor
 public class Member extends BaseEntity {
 
     @Id
@@ -25,10 +27,25 @@ public class Member extends BaseEntity {
     @Column(nullable = false, unique = true, length = 255)
     private String email;
 
+    // 암호화된 비밀번호
+    @Column(name = "password", nullable = false, length = 100)
+    private String password;
+
+
     private Long score;
     private String tier;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private Role role;
+
+    public Member(String nickname, String email, String encodedPassword) {
+        this.nickname = nickname;
+        this.email = email;
+        this.password = encodedPassword;
+    }
+
+    public static Member createUser(String nickname, String email, String encodedPassword) {
+        return new Member(nickname, email, encodedPassword);
+    }
 }
