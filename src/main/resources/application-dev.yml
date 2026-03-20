@@ -1,13 +1,14 @@
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/back?reWriteBatchedInserts=true
-    username: back
-    password: back1234
+    # 팀 로컬 기본값은 docker-compose.yml과 동일하게 유지한다.
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:back}?reWriteBatchedInserts=true
+    username: ${DB_USERNAME:back}
+    password: ${DB_PASSWORD:back1234}
     driver-class-name: org.postgresql.Driver
 
   jpa:
     hibernate:
-      ddl-auto: create
+      ddl-auto: update
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
