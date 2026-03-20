@@ -102,4 +102,9 @@ public class MatchingQueueService {
         return new QueueStatusResponse(
                 "매칭 대기열에서 취소되었습니다.", queueKey.category(), queueKey.difficulty().name(), queue.size());
     }
+
+    // 테스트에서 큐 정리 여부를 확인하기 위한 package-private 조회 메서드
+    boolean hasQueue(QueueKey queueKey) {
+        return waitingQueues.containsKey(queueKey);
+    }
 }

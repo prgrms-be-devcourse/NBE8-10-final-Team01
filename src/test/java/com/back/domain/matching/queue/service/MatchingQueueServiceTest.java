@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import com.back.domain.matching.queue.dto.QueueJoinRequest;
 import com.back.domain.matching.queue.dto.QueueStatusResponse;
 import com.back.domain.matching.queue.model.Difficulty;
+import com.back.domain.matching.queue.model.QueueKey;
 
 class MatchingQueueServiceTest {
 
@@ -75,6 +76,26 @@ class MatchingQueueServiceTest {
         assertThatThrownBy(() -> matchingQueueService.cancelQueue(userId))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("현재 매칭 대기열에 참가 중이 아닙니다.");
+    }
+
+    @Test
+    @DisplayName("마지막 한 명이 큐를 취소하면 해당 큐는 waitingQueues에서 제거된다")
+    void cancelQueue_removesEmptyQueue() {
+        // given
+        Long userId = 1L;
+        QueueJoinRequest request = createRequest("Array", Difficulty.EASY);
+        QueueKey queueKey = new QueueKey("Array", Difficulty.EASY);
+
+        matchingQueueService.joinQueue(userId, request);
+
+        // 사전 확인
+        assertThat(matchingQueueService.hasQueue(queueKey)).isTrue();
+
+        // when
+        matchingQueueService.cancelQueue(userId);
+
+        // then
+        assertThat(matchingQueueService.hasQueue(queueKey)).isFalse();
     }
 
     private QueueJoinRequest createRequest(String category, Difficulty difficulty) {
