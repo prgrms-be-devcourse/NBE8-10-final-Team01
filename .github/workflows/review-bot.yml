@@ -1,0 +1,385 @@
+name: AI PR Inline Review Bot
+
+on:
+  pull_request:
+    # PR 생성 / 커밋 추가 / 다시 열기 / draft 해제 시 실행
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  # 코드/PR diff 읽기
+  contents: read
+  # PR 리뷰 코멘트 작성
+  pull-requests: write
+
+jobs:
+  review:
+    # draft PR / fork PR은 건너뜀 (fork에는 secret 미주입)
+    if: github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get PR diff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.url }}
+        run: |
+          # PR diff 저장
+          curl -L \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github.v3.diff" \
+            "$PR_URL" > pr.diff
+
+          echo "===== RAW DIFF SIZE ====="
+          wc -c pr.diff
+
+      - name: Trim diff for token saving
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          diff = Path("pr.diff").read_text(errors="ignore")
+
+          # ---------------------------
+          # 수정 포인트 1
+          # 리뷰 제외 파일들
+          # ---------------------------
+          excluded_keywords = [
+              "package-lock.json",
+              "pnpm-lock.yaml",
+              "yarn.lock",
+              "bun.lockb",
+              ".next/",
+              "dist/",
+              "build/",
+              "coverage/",
+              ".gradle/",
+              ".idea/",
+              ".png",
+              ".jpg",
+              ".jpeg",
+              ".gif",
+              ".svg",
+              ".webp",
+              ".ico",
+              ".pdf"
+          ]
+
+          filtered_lines = []
+          current_block = []
+          skip_block = False
+
+          for line in diff.splitlines():
+              if line.startswith("diff --git "):
+                  if current_block and not skip_block:
+                      filtered_lines.extend(current_block)
+                  current_block = [line]
+                  skip_block = any(k in line for k in excluded_keywords)
+              else:
+                  current_block.append(line)
+
+          if current_block and not skip_block:
+              filtered_lines.extend(current_block)
+
+          filtered = "\n".join(filtered_lines)
+
+          # ---------------------------
+          # 수정 포인트 2
+          # diff 최대 길이
+          # 너무 키우면 비용 증가
+          # ---------------------------
+          MAX_DIFF_CHARS = 15000
+          if len(filtered) > MAX_DIFF_CHARS:
+              # 중간 글자 단위로 자르면 잘못된 리뷰(예: "파일이 중간에 잘렸다")가 늘어난다.
+              # 라인 단위로만 자르되, 마지막 줄은 항상 완전한 줄만 유지한다.
+              clipped_lines = []
+              current_size = 0
+              for line in filtered.splitlines():
+                  line_size = len(line) + 1  # newline 포함
+                  if current_size + line_size > MAX_DIFF_CHARS:
+                      break
+                  clipped_lines.append(line)
+                  current_size += line_size
+              filtered = "\n".join(clipped_lines)
+
+          Path("pr_trimmed.diff").write_text(filtered)
+          print("===== TRIMMED DIFF LENGTH =====")
+          print(len(filtered))
+          PY
+
+      - name: Ask OpenAI for structured review
+        env:
+          # ---------------------------
+          # 수정 포인트 3
+          # 시크릿 이름 확인
+          # ---------------------------
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import time
+          from pathlib import Path
+          from urllib.error import HTTPError, URLError
+          from urllib.request import Request, urlopen
+
+          diff = Path("pr_trimmed.diff").read_text(errors="ignore").strip()
+
+          if not diff:
+              result = {
+                  "summary": "변경 내용이 너무 작거나 제외 대상 파일만 있어 리뷰를 생략했습니다.",
+                  "comments": []
+              }
+              Path("review_result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2))
+              raise SystemExit(0)
+
+          # ---------------------------
+          # 수정 포인트 4
+          # 프롬프트
+          # 반드시 JSON만 반환하게 강하게 제한
+          # ---------------------------
+          prompt = f"""
+          너는 GitHub Pull Request 코드 리뷰어다.
+
+          아래 PR diff를 보고, '정말 지적할 가치가 있는 문제'만 골라라.
+          억지 지적은 금지한다.
+
+          반드시 아래 JSON 형식으로만 답해라.
+          코드블록 마크다운 없이 순수 JSON만 출력해라.
+
+          {{
+            "summary": "전체 리뷰 요약 한두 문장",
+            "comments": [
+              {{
+                "path": "파일경로",
+                "line": 123,
+                "severity": "critical|high|medium|low",
+                "issue": "실제 문제를 한두 문장으로 설명",
+                "reason": "왜 문제인지 근거를 구체적으로 설명",
+                "suggestion": "해결 방법(선택 항목)"
+              }}
+            ]
+          }}
+
+          규칙:
+          1. comments는 최대 5개
+          2. severity는 critical, high, medium, low 중 하나만 사용
+          3. 반드시 diff에 존재하는 파일만 사용
+          4. line은 '새 코드 기준 라인 번호'를 사용
+          5. 확실하지 않으면 comment를 만들지 마라
+          6. 문제 없으면 comments는 빈 배열로 둬라
+          7. 버그 가능성, 예외 처리 누락, 보안, 성능, 치명적 가독성 문제 위주
+          8. 리뷰는 한국어로 작성
+          9. issue/reason/suggestion에는 라벨("내용:", "근거:", "제안:")을 넣지 말고 본문만 작성
+          10. suggestion은 불필요하면 생략 가능
+          11. diff는 길이 제한으로 일부 생략될 수 있으니, 파일이 중간에 잘렸다는 유형의 추정 지적은 금지
+
+          PR DIFF:
+          {diff}
+          """
+
+          # 우선 요청 모델(5.3-mini)을 시도하고, 미지원이면 gpt-5-mini로 폴백
+          preferred_model = "gpt-5.3-mini"
+          fallback_model = "gpt-5-mini"
+          models_to_try = [preferred_model]
+          if preferred_model != fallback_model:
+              models_to_try.append(fallback_model)
+
+          result = None
+          last_error = None
+          request_timeout_sec = 60
+          max_retries = 3
+          retry_backoff_sec = 2
+          for model_name in models_to_try:
+              for attempt in range(1, max_retries + 1):
+                  body = {
+                      "model": model_name,
+                      "input": prompt
+                  }
+
+                  req = Request(
+                      "https://api.openai.com/v1/responses",
+                      data=json.dumps(body).encode("utf-8"),
+                      headers={
+                          "Content-Type": "application/json",
+                          "Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}",
+                      },
+                      method="POST",
+                  )
+
+                  try:
+                      with urlopen(req, timeout=request_timeout_sec) as res:
+                          result = json.loads(res.read().decode("utf-8"))
+                      print(f"OpenAI model used: {model_name} (attempt {attempt})")
+                      break
+                  except (HTTPError, URLError, TimeoutError, OSError, ValueError) as e:
+                      last_error = e
+                      if attempt < max_retries:
+                          sleep_sec = retry_backoff_sec ** (attempt - 1)
+                          print(
+                              f"OpenAI call failed for model={model_name}, attempt={attempt}: {e}. "
+                              f"Retry in {sleep_sec}s."
+                          )
+                          time.sleep(sleep_sec)
+                      else:
+                          print(f"OpenAI call failed for model={model_name} after {attempt} attempts: {e}")
+              if result is not None:
+                  break
+
+          if result is None:
+              fallback = {
+                  "summary": (
+                      "OpenAI 호출에 실패해 자동 인라인 리뷰를 생략했습니다. "
+                      "잠시 후 다시 실행해 주세요."
+                  ),
+                  "comments": []
+              }
+              if last_error:
+                  fallback["summary"] += f" (원인: {last_error})"
+
+              Path("review_result.json").write_text(
+                  json.dumps(fallback, ensure_ascii=False, indent=2)
+              )
+              print("===== REVIEW RESULT JSON (FALLBACK) =====")
+              print(json.dumps(fallback, ensure_ascii=False, indent=2))
+              raise SystemExit(0)
+
+          text_parts = []
+          for item in result.get("output", []):
+              for content in item.get("content", []):
+                  if content.get("type") == "output_text":
+                      text_parts.append(content.get("text", ""))
+
+          raw_text = "\n".join(text_parts).strip()
+
+          # JSON 파싱 실패 대비
+          try:
+              parsed = json.loads(raw_text)
+          except Exception:
+              parsed = {
+                  "summary": "AI 응답을 구조화하지 못해 인라인 리뷰를 생략했습니다.",
+                  "comments": []
+              }
+
+          # 기본값 보정
+          if "summary" not in parsed:
+              parsed["summary"] = "리뷰 요약이 없습니다."
+          if "comments" not in parsed or not isinstance(parsed["comments"], list):
+              parsed["comments"] = []
+
+          # 최대 5개로 제한
+          parsed["comments"] = parsed["comments"][:5]
+
+          Path("review_result.json").write_text(
+              json.dumps(parsed, ensure_ascii=False, indent=2)
+          )
+
+          print("===== REVIEW RESULT JSON =====")
+          print(json.dumps(parsed, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Create review summary and inline comments
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const review = JSON.parse(fs.readFileSync('review_result.json', 'utf8'));
+
+            const pr = context.payload.pull_request;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pull_number = pr.number;
+            const commit_id = pr.head.sha;
+
+            // ---------------------------
+            // 수정 포인트 6
+            // summary는 리뷰 본문
+            // comments는 인라인 코멘트 목록
+            // ---------------------------
+            const rawComments = Array.isArray(review.comments) ? review.comments : [];
+
+            const severityMeta = {
+              critical: { icon: '🔴', label: 'CRITICAL' },
+              high: { icon: '🟠', label: 'HIGH' },
+              medium: { icon: '🟡', label: 'MEDIUM' },
+              low: { icon: '🟢', label: 'LOW' }
+            };
+
+            const normalizeSeverity = (severity) => {
+              const value = String(severity || '').toLowerCase().trim();
+              return value in severityMeta ? value : 'medium';
+            };
+
+            const buildBody = (comment) => {
+              const sev = severityMeta[normalizeSeverity(comment.severity)];
+              const issue = String(comment.issue || '').trim() || '문제 설명이 누락되었습니다.';
+              const reason = String(comment.reason || '').trim() || '근거가 누락되었습니다.';
+              const suggestion = String(comment.suggestion || '').trim();
+
+              const lines = [
+                `${sev.icon} [${sev.label}]`,
+                '',
+                `내용: ${issue}`,
+                `근거: ${reason}`
+              ];
+
+              if (suggestion) {
+                lines.push(`제안: ${suggestion}`);
+              }
+
+              return lines.join('\n');
+            };
+
+            const comments = rawComments
+              .filter(c => c.path && Number.isFinite(Number(c.line)))
+              .map(c => ({
+                path: c.path,
+                line: Number(c.line),
+                severity: c.severity,
+                issue: c.issue,
+                reason: c.reason,
+                suggestion: c.suggestion,
+                body: buildBody(c)
+              }))
+              .slice(0, 5);
+
+            let created = 0;
+            let failed = 0;
+            for (const c of comments) {
+              try {
+                await github.rest.pulls.createReviewComment({
+                  owner,
+                  repo,
+                  pull_number,
+                  commit_id,
+                  path: c.path,
+                  line: c.line,
+                  side: 'RIGHT',
+                  body: c.body
+                });
+                created += 1;
+              } catch (e) {
+                failed += 1;
+                console.log(`Inline comment failed: ${c.path}:${c.line}`);
+                console.log(e);
+              }
+            }
+
+            const summaryLines = [
+              '## AI 리뷰 요약',
+              '',
+              String(review.summary || '요약 없음'),
+              '',
+              `- 인라인 코멘트 성공: ${created}건`,
+              `- 인라인 코멘트 실패: ${failed}건`
+            ];
+
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: pull_number,
+              body: summaryLines.join('\n')
+            });

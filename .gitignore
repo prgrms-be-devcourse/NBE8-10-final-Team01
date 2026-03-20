@@ -38,6 +38,17 @@ out/
 
 ### custom ###
 .env
-*.md
 .DS_Store
+.local-md/
+
+### local dataset / cache (커밋 금지) ###
+.local-data/
+data/
+dataset/
+datasets/
+downloads/
+scripts/__pycache__/
+**/__pycache__/
+*.pyc
+*.md
 .claude
