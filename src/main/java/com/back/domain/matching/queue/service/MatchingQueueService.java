@@ -45,11 +45,12 @@ public class MatchingQueueService {
      */
     public QueueStatusResponse joinQueue(Long userId, QueueJoinRequest request) {
         // 이미 대기열에 들어가 있는 유저는 다시 참가할 수 없다.
-        if (userQueueMap.containsKey(userId)) {
+        QueueKey queueKey = new QueueKey(request.getCategory(), request.getDifficulty());
+
+        // putIfAbsent를 사용하여 중복 참가를 원자적으로 방지합니다.
+        if (userQueueMap.putIfAbsent(userId, queueKey) != null) {
             throw new IllegalStateException("이미 매칭 대기열에 참가 중인 사용자입니다.");
         }
-
-        QueueKey queueKey = new QueueKey(request.getCategory(), request.getDifficulty());
 
         // 해당 큐가 없으면 새로 만들고, 있으면 기존 큐를 가져온다.
         Deque<WaitingUser> queue = waitingQueues.computeIfAbsent(queueKey, key -> new ConcurrentLinkedDeque<>());
@@ -58,9 +59,6 @@ public class MatchingQueueService {
 
         // 큐의 맨 뒤에 추가
         queue.addLast(waitingUser);
-
-        // 유저가 어느 큐에 들어갔는지 기록
-        userQueueMap.put(userId, queueKey);
 
         return new QueueStatusResponse(
                 "매칭 대기열에 참가했습니다.", queueKey.category(), queueKey.difficulty().name(), queue.size());
