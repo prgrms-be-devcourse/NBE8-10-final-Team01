@@ -56,10 +56,14 @@ public class SubmissionService {
                 .findById(request.memberId())
                 .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 회원입니다."));
 
-        // 3. BattleParticipant 조회
+        // 3. BattleParticipant 조회 + 제출 가능 상태 검증
         BattleParticipant participant = battleParticipantRepository
                 .findByBattleRoomAndMember(room, member)
                 .orElseThrow(() -> new IllegalArgumentException("해당 방의 참여자가 아닙니다."));
+
+        if (participant.getStatus() != BattleParticipantStatus.PLAYING) {
+            throw new IllegalStateException("제출할 수 없는 상태입니다. 현재 상태: " + participant.getStatus());
+        }
 
         // 4. Submission 생성 후 저장
         Submission submission = Submission.create(room, member, request.code(), request.language());
@@ -75,6 +79,10 @@ public class SubmissionService {
         submission.applyJudgeResult(result, passedCount, totalCount);
 
         // 7. WebSocket 브로드캐스트 - 제출 결과 전파
+        // TODO: 리팩토링 - 트랜잭션 커밋 전 메시지 전송 문제
+        //   현재 @Transactional 안에서 convertAndSend 호출 시 커밋 전에 메시지가 전송됨
+        //   수신자가 DB 조회 시 아직 반영되지 않은 상태를 볼 수 있음
+        //   → TransactionSynchronizationManager.registerSynchronization의 afterCommit()으로 개선 필요
         messagingTemplate.convertAndSend(
                 "/topic/room/" + room.getId(),
                 Map.of(
