@@ -442,7 +442,11 @@ def default_dsn() -> str:
     port = os.getenv("DB_PORT", "5432")
     name = os.getenv("DB_NAME", "back")
     user = os.getenv("DB_USERNAME", "back")
-    password = os.getenv("DB_PASSWORD", "back1234")
+    password = os.getenv("DB_PASSWORD")
+    if not password:
+        raise ValueError(
+            "DB_PASSWORD is required. Set it in .env and export it, or pass --dsn/LOAD_DSN."
+        )
     return f"postgresql://{user}:{password}@{host}:{port}/{name}"
 
 
@@ -451,7 +455,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Load open-r1 verifiable into PostgreSQL.")
     parser.add_argument(
         "--dsn",
-        default=os.getenv("LOAD_DSN", default_dsn()),
+        default=os.getenv("LOAD_DSN"),
         help="PostgreSQL DSN",
     )
     parser.add_argument("--offset", type=int, default=0)
@@ -472,6 +476,13 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     """엔드투엔드 적재 실행 진입점."""
     args = parse_args()
+    if not args.dry_run and not args.dsn:
+        try:
+            args.dsn = default_dsn()
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+
     tag_cache: dict[str, int] = {}
     stats = {
         "rows_fetched": 0,

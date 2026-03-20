@@ -3,6 +3,17 @@
 로컬 개발/데이터 적재를 팀 공통으로 맞추기 위한 최소 실행 가이드입니다.
 아래 명령은 현재 위치와 관계없이 프로젝트 루트를 자동으로 찾아 실행하도록 작성했습니다.
 
+## 0) `.env` 준비 (필수)
+
+민감한 값은 저장소에 커밋하지 않고 `.env`에서 관리합니다.
+
+```bash
+cd "$(git rev-parse --show-toplevel)" && cp .env.example .env
+```
+
+- `.env`의 `DB_PASSWORD`는 로컬 전용 강한 값으로 변경하세요.
+- `.env`는 `.gitignore`에 포함되어 있어 커밋되지 않습니다.
+
 ## 1) PostgreSQL 실행 (Docker Compose)
 
 주의: 실행 전에 docker desktop이 켜져 있어야 합니다.
@@ -14,7 +25,7 @@ cd "$(git rev-parse --show-toplevel)" && docker compose ps
 
 - 기본 포트: `5432`
 - 기본 DB: `back`
-- 기본 계정: `back / back1234`
+- 기본 계정: `DB_USERNAME / DB_PASSWORD`
 - 실제 값은 `.env`를 따릅니다.
 
 ## 2) Spring Boot 실행 (스키마 반영)
@@ -23,7 +34,7 @@ cd "$(git rev-parse --show-toplevel)" && docker compose ps
 - 대체 방법(터미널):
 
 ```bash
-cd "$(git rev-parse --show-toplevel)" && ./gradlew bootRun
+cd "$(git rev-parse --show-toplevel)" && set -a && source .env && set +a && ./gradlew bootRun
 ```
 
 - `application-dev.yml`은 `DB_HOST/DB_PORT/DB_NAME/DB_USERNAME/DB_PASSWORD`를 사용합니다.
@@ -35,7 +46,7 @@ cd "$(git rev-parse --show-toplevel)" && ./gradlew bootRun
 
 ```bash
 cd "$(git rev-parse --show-toplevel)" && python3 -m pip install -U requests "psycopg[binary]"
-cd "$(git rev-parse --show-toplevel)" && python3 scripts/load_openr1_verifiable.py --limit 200 --chunk-size 50
+cd "$(git rev-parse --show-toplevel)" && set -a && source .env && set +a && python3 scripts/load_openr1_verifiable.py --limit 200 --chunk-size 50
 ```
 
 - `--limit`은 "이번 실행에서 가져올 최대 문제 수"입니다.
@@ -50,7 +61,7 @@ cd "$(git rev-parse --show-toplevel)" && python3 scripts/load_openr1_verifiable.
 전체 적재에 가깝게 넣고 싶으면 `limit`을 충분히 크게 줍니다.
 
 ```bash
-cd "$(git rev-parse --show-toplevel)" && python3 scripts/load_openr1_verifiable.py --truncate --limit 10000 --chunk-size 100
+cd "$(git rev-parse --show-toplevel)" && set -a && source .env && set +a && python3 scripts/load_openr1_verifiable.py --truncate --limit 10000 --chunk-size 100
 ```
 
 - 실제 데이터가 `limit`보다 적으면 가능한 행까지만 적재하고 종료합니다.
@@ -59,7 +70,7 @@ cd "$(git rev-parse --show-toplevel)" && python3 scripts/load_openr1_verifiable.
 - 샘플 데이터를 초기화 후 다시 넣을 때:
 
 ```bash
-cd "$(git rev-parse --show-toplevel)" && python3 scripts/load_openr1_verifiable.py --truncate --limit 200 --chunk-size 50
+cd "$(git rev-parse --show-toplevel)" && set -a && source .env && set +a && python3 scripts/load_openr1_verifiable.py --truncate --limit 200 --chunk-size 50
 ```
 
 ## 4) IntelliJ에서 확인
@@ -70,13 +81,13 @@ cd "$(git rev-parse --show-toplevel)" && python3 scripts/load_openr1_verifiable.
 - Host: `localhost`
 - Port: `5432`
 - User: `back`
-- Password: `back1234`
+- Password: `.env`의 `DB_PASSWORD` 값
 - Database: `back`
 
 ![IntelliJ PostgreSQL 데이터소스 설정 화면](./assets/intellij-postgresql-datasource.png)
 
 1. `Database` 탭에서 PostgreSQL 데이터소스 추가  
-   host=`localhost`, port=`5432`, db=`back`, user=`back`, password=`back1234`
+   host=`localhost`, port=`5432`, db=`back`, user=`back`, password=`.env의 DB_PASSWORD`
 2. 아래 쿼리로 적재 결과 확인
 
 ```sql
@@ -101,7 +112,7 @@ limit 20;
 ### DBeaver 접속 설정
 
 1. `Database > New Database Connection > PostgreSQL`
-2. Host=`localhost`, Port=`5432`, Database=`back`, User=`back`, Password=`back1234`
+2. Host=`localhost`, Port=`5432`, Database=`back`, User=`back`, Password=`.env의 DB_PASSWORD`
 3. `Test Connection` 성공 후 `Finish`
 4. 좌측 `Database Navigator`에서 `Schemas > public > Tables` 확인
 
@@ -118,5 +129,10 @@ limit 20;
 - 현재 폴더가 `docs`이면 아래처럼 실행해도 됩니다.
 
 ```bash
-python3 ../scripts/load_openr1_verifiable.py --limit 200 --chunk-size 50
+set -a && source ../.env && set +a && python3 ../scripts/load_openr1_verifiable.py --limit 200 --chunk-size 50
 ```
+
+## 6) 마무리 체크
+
+- 문서의 모든 명령어 블록이 닫혀 있는지 확인합니다.
+- `docker compose ps`에서 `postgres`가 `healthy` 상태인지 확인합니다.

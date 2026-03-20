@@ -1,13 +1,13 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: nbe8-team01-postgres
     restart: unless-stopped
     environment:
       # Spring dev 프로필과 로더 스크립트 기본값을 이 값과 맞춘다.
       POSTGRES_DB: ${DB_NAME:-back}
       POSTGRES_USER: ${DB_USERNAME:-back}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-back1234}
+      # 보안을 위해 DB 비밀번호 기본값은 두지 않는다.
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD not set}
       TZ: Asia/Seoul
     ports:
       - "${DB_PORT:-5432}:5432"
