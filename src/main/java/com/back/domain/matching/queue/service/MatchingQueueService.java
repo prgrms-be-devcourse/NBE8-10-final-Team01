@@ -63,4 +63,43 @@ public class MatchingQueueService {
         return new QueueStatusResponse(
                 "매칭 대기열에 참가했습니다.", queueKey.category(), queueKey.difficulty().name(), queue.size());
     }
+
+    public QueueStatusResponse cancelQueue(Long userId) {
+        // 1. 유저가 어느 큐에 들어가 있는지 찾는다.
+        QueueKey queueKey = userQueueMap.get(userId);
+
+        // 2. 대기열에 없는 유저면 예외 발생
+        if (queueKey == null) {
+            throw new IllegalStateException("현재 매칭 대기열에 참가 중이 아닙니다.");
+        }
+
+        // 3. 해당 큐를 가져온다.
+        Deque<WaitingUser> queue = waitingQueues.get(queueKey);
+
+        // 4. 큐 자체가 없으면 비정상 상태
+        if (queue == null) {
+            userQueueMap.remove(userId);
+            throw new IllegalStateException("대기열 정보를 찾을 수 없습니다.");
+        }
+
+        // 5. 큐에서 해당 userId를 가진 WaitingUser 제거
+        boolean removed = queue.removeIf(waitingUser -> waitingUser.getUserId().equals(userId));
+
+        // 6. userQueueMap에서도 제거
+        userQueueMap.remove(userId);
+
+        // 7. 큐에서 제거 실패 시 예외
+        if (!removed) {
+            throw new IllegalStateException("대기열에서 사용자를 제거하지 못했습니다.");
+        }
+
+        // 8. 큐가 비었으면 waitingQueues에서도 제거
+        if (queue.isEmpty()) {
+            waitingQueues.remove(queueKey);
+        }
+
+        // 9. 응답 반환
+        return new QueueStatusResponse(
+                "매칭 대기열에서 취소되었습니다.", queueKey.category(), queueKey.difficulty().name(), queue.size());
+    }
 }

@@ -26,4 +26,9 @@ public class MatchingQueueController {
     public QueueStatusResponse joinQueue(@RequestParam Long userId, @Valid @RequestBody QueueJoinRequest request) {
         return matchingQueueService.joinQueue(userId, request);
     }
+
+    @DeleteMapping("/cancel")
+    public QueueStatusResponse cancelQueue(@RequestParam Long userId) {
+        return matchingQueueService.cancelQueue(userId);
+    }
 }
