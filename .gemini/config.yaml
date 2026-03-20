@@ -12,7 +12,7 @@ code_review:
   # 이 값 이상만 코멘트 생성(MEDIUM이면 LOW 제외)
   comment_severity_threshold: MEDIUM
   # PR 하나에서 생성할 최대 코멘트 수
-  max_review_comments: 3
+  max_review_comments: 5
   pull_request_opened:
     # '/gemini' 사용 가이드 코멘트 비활성화
     help: false

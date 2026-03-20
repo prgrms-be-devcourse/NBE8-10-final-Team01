@@ -31,6 +31,8 @@ cd "$(git rev-parse --show-toplevel)" && ./gradlew bootRun
 
 ## 3) open-r1/codeforces 데이터 적재
 
+원칙: 원본 데이터 파일(parquet/json/csv 등)은 저장소에 커밋하지 않고 로컬에서만 사용합니다.
+
 ```bash
 cd "$(git rev-parse --show-toplevel)" && python3 -m pip install -U requests "psycopg[binary]"
 cd "$(git rev-parse --show-toplevel)" && python3 scripts/load_openr1_verifiable.py --limit 200 --chunk-size 50
@@ -39,6 +41,7 @@ cd "$(git rev-parse --show-toplevel)" && python3 scripts/load_openr1_verifiable.
 - `--limit`은 "이번 실행에서 가져올 최대 문제 수"입니다.
 - 위 예시는 동작 확인용 샘플 적재(200건)입니다.
 - `--chunk-size`는 HF API 요청 1회당 조회 건수입니다.
+- 현재 로더는 HF API에서 바로 읽어 DB에 넣으며, 데이터 파일을 저장소에 저장하지 않습니다.
 - `input_format`, `output_format`은 `problems` 컬럼에 분리 저장됩니다.
 - 중복 판별은 `source_problem_id`(예: `852/A`)를 우선 사용합니다.
 - 같은 구간을 다시 실행하면 기존 문제는 건너뜁니다. (`skipped_existing_problem` 증가)
