@@ -3,14 +3,13 @@ package com.back.domain.member.member.service;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import lombok.RequiredArgsConstructor;
-
 import com.back.domain.member.member.dto.JoinRequest;
 import com.back.domain.member.member.entity.Member;
 import com.back.domain.member.member.repository.MemberRepository;
 import com.back.global.exception.ServiceException;
-import com.back.global.response.ApiResponse;
 import com.back.global.rsData.RsData;
+
+import lombok.RequiredArgsConstructor;
 
 @Service
 @RequiredArgsConstructor
@@ -43,14 +42,10 @@ public class MemberService {
         String encodedPassword = passwordEncoder.encode(req.password());
 
         // 회원 생성 (엔티티 팩토리 메서드 사용)
-        Member member =
-                Member.createUser(req.name(), req.email(), encodedPassword);
+        Member member = Member.createUser(req.name(), req.email(), encodedPassword);
 
         Member savedMember = memberRepository.save(member);
 
-        return RsData(
-                "201-1",
-                "${member.name}님 환영합니다. 회원가입이 완료되었습니다."
-        )
+        return RsData.of("200", "");
     }
 }

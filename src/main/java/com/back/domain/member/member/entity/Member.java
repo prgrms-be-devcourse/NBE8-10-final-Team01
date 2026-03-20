@@ -31,7 +31,6 @@ public class Member extends BaseEntity {
     @Column(name = "password", nullable = false, length = 100)
     private String password;
 
-
     private Long score;
     private String tier;
 
