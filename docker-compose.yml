@@ -6,8 +6,8 @@ services:
       # Spring dev 프로필과 로더 스크립트 기본값을 이 값과 맞춘다.
       POSTGRES_DB: ${DB_NAME:-back}
       POSTGRES_USER: ${DB_USERNAME:-back}
-      # 보안을 위해 DB 비밀번호 기본값은 두지 않는다.
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD not set}
+      # 보안을 위해 기본 비밀번호는 두지 않고 환경변수 주입을 사용한다.
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
       TZ: Asia/Seoul
     ports:
       - "${DB_PORT:-5432}:5432"
