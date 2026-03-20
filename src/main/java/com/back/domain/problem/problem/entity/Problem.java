@@ -35,7 +35,7 @@ public class Problem extends BaseEntity {
     @Column(nullable = false, length = 10)
     private DifficultyLevel difficulty;
 
-    @Column(columnDefinition = "TEXT")
+    @Column(columnDefinition = "TEXT", nullable = false)
     private String content;
 
     @Column(name = "difficulty_rating")
@@ -43,6 +43,8 @@ public class Problem extends BaseEntity {
     private Integer difficultyRating;
 
     private Long timeLimitMs;
+
+    @Column(nullable = false)
     private Long memoryLimitMb;
 
     @Column(name = "input_format", columnDefinition = "TEXT")

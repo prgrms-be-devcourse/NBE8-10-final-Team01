@@ -1,10 +1,8 @@
 package com.back.domain.battle.battleroom.entity;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
 
-import com.back.domain.battle.battleparticipant.entity.BattleParticipant;
 import com.back.domain.problem.problem.entity.Problem;
 import com.back.global.jpa.entity.BaseEntity;
 
@@ -18,6 +16,7 @@ import lombok.NoArgsConstructor;
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class BattleRoom extends BaseEntity {
+
     @Id
     @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "battle_room_seq_gen")
     @SequenceGenerator(name = "battle_room_seq_gen", sequenceName = "battle_room_id_seq", allocationSize = 50)
@@ -27,10 +26,37 @@ public class BattleRoom extends BaseEntity {
     @JoinColumn(name = "problem_id")
     private Problem problem;
 
-    private String status; // WAITING, PROGRESS, FINISHED
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private BattleRoomStatus status;
+
     private Integer maxPlayers;
     private LocalDateTime timerEnd;
 
-    @OneToMany(mappedBy = "battleRoom", cascade = CascadeType.ALL, orphanRemoval = true)
-    private List<BattleParticipant> participants = new ArrayList<>();
+    /**
+     * 방은 waiting 상태로 먼저 생성된다. (아무도 입장 안한 상태)
+     * 참여자는 READY 상태 (입장 대기 중)
+     * timerEnd는 null (모두 입장 후 세팅됨)
+     */
+    public static BattleRoom create(Problem problem, int maxPlayers) {
+        BattleRoom room = new BattleRoom();
+        room.problem = problem;
+        room.maxPlayers = maxPlayers;
+        room.status = BattleRoomStatus.WAITING;
+
+        return room;
+    }
+
+    public void startBattle(Duration duration) {
+        this.status = BattleRoomStatus.PLAYING;
+        this.timerEnd = LocalDateTime.now().plus(duration);
+    }
+
+    public void finish() {
+        this.status = BattleRoomStatus.FINISHED;
+    }
+
+    public boolean isExpired() {
+        return timerEnd != null && LocalDateTime.now().isAfter(timerEnd);
+    }
 }
