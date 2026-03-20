@@ -96,7 +96,10 @@ public class SubmissionService {
         if ("AC".equals(result)) {
             participant.complete(LocalDateTime.now());
 
-            // 현재 완료된 참여자 수를 rank로 사용
+            // TODO: 리팩토링 - 현재 참여자 수가 최대 4명으로 고정이라 성능 문제 없으나,
+            //   추후 참여자 수 확장 시 DB 집계 쿼리로 교체 필요
+            //   → BattleParticipantRepository에 countByBattleRoomAndStatus 추가 후
+            //      completedCount = repo.countByBattleRoomAndStatus(room, EXIT) 으로 변경
             List<BattleParticipant> allParticipants = battleParticipantRepository.findByBattleRoom(room);
             long completedCount = allParticipants.stream()
                     .filter(p -> p.getStatus() == BattleParticipantStatus.EXIT)
