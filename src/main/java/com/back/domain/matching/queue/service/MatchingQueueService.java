@@ -187,9 +187,12 @@ public class MatchingQueueService {
 
             return response;
         } catch (RuntimeException e) {
-            // 9) 생성 실패 시 큐 원복: 뽑았던 4명을 원래 순서대로 되돌리기
-            for (int i = matchedUsers.size() - 1; i >= 0; i--) {
-                queue.addFirst(matchedUsers.get(i));
+            // 생성 실패 시 큐 원복: 뽑았던 4명을 원래 순서대로 되돌리기
+            // 롤백도 큐 변경이므로 같은 락으로 보호
+            synchronized (queue) {
+                for (int i = matchedUsers.size() - 1; i >= 0; i--) {
+                    queue.addFirst(matchedUsers.get(i));
+                }
             }
             throw e;
         }
