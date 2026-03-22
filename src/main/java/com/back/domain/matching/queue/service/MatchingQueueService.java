@@ -70,10 +70,13 @@ public class MatchingQueueService {
         WaitingUser waitingUser = new WaitingUser(userId, queueKey);
 
         // 큐의 맨 뒤에 추가
-        queue.addLast(waitingUser);
-
+        int currentSize;
+        synchronized (queue) {
+            queue.addLast(waitingUser);
+            currentSize = queue.size();
+        }
         // 1차 빠른 체크: 4명 미만이면 굳이 매칭 함수까지 안 들어감
-        if (queue.size() < 4) {
+        if (currentSize < 4) {
             return new QueueStatusResponse(
                     "매칭 대기열에 참가했습니다.",
                     queueKey.category(),
@@ -115,15 +118,21 @@ public class MatchingQueueService {
             throw new IllegalStateException("대기열 정보를 찾을 수 없습니다.");
         }
 
-        // 5. 큐에서 해당 userId를 가진 WaitingUser 제거
-        boolean removed = queue.removeIf(waitingUser -> waitingUser.getUserId().equals(userId));
+        int currentSize;
+        boolean removed;
 
-        // 6. userQueueMap에서도 제거
-        userQueueMap.remove(userId);
+        synchronized (queue) {
+            // 5. 큐에서 해당 userId를 가진 WaitingUser 제거
+            removed = queue.removeIf(waitingUser -> waitingUser.getUserId().equals(userId));
 
-        // 7. 큐에서 제거 실패 시 예외
-        if (!removed) {
-            throw new IllegalStateException("대기열에서 사용자를 제거하지 못했습니다.");
+            // 7. 큐에서 제거 실패 시 예외
+            if (!removed) {
+                throw new IllegalStateException("대기열에서 사용자를 제거하지 못했습니다.");
+            }
+
+            // 6. userQueueMap에서도 제거
+            userQueueMap.remove(userId);
+            currentSize = queue.size();
         }
 
         // 8. 해당 큐가 비어 있으면 삭제하고, 안 비어 있으면 그대로 둬라
@@ -131,7 +140,7 @@ public class MatchingQueueService {
 
         // 9. 응답 반환
         return new QueueStatusResponse(
-                "매칭 대기열에서 취소되었습니다.", queueKey.category(), queueKey.difficulty().name(), queue.size());
+                "매칭 대기열에서 취소되었습니다.", queueKey.category(), queueKey.difficulty().name(), currentSize);
     }
 
     // 4인 매칭 + 방 생성
