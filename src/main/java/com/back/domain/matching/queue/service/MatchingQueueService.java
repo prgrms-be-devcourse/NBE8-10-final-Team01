@@ -72,10 +72,18 @@ public class MatchingQueueService {
         // 큐의 맨 뒤에 추가
         queue.addLast(waitingUser);
 
-        // 4명 매칭 시 방 생성 시도
+        // 1차 빠른 체크: 4명 미만이면 굳이 매칭 함수까지 안 들어감
+        if (queue.size() < 4) {
+            return new QueueStatusResponse(
+                    "매칭 대기열에 참가했습니다.",
+                    queueKey.category(),
+                    queueKey.difficulty().name(),
+                    queue.size());
+        }
+
+        // 4명 이상일 때만 실제 매칭 시도
         CreateRoomResponse room = tryMatchAndCreateRoom(queueKey, queue);
 
-        // 방 생성 성공이면 성공 메시지 반환
         if (room != null) {
             return new QueueStatusResponse(
                     "매칭 성사 및 방 생성 완료 (roomId=" + room.roomId() + ")",
@@ -128,15 +136,20 @@ public class MatchingQueueService {
 
     // 4인 매칭 + 방 생성
     private CreateRoomResponse tryMatchAndCreateRoom(QueueKey queueKey, Deque<WaitingUser> queue) {
-        // 같은 큐에 대한 동시 접근(join/cancel) 충돌 방지
+
+        List<WaitingUser> matchedUsers;
+
+        // 락 안에서는 4명 확인 + 4명 추출까지만 수행
         synchronized (queue) {
-            // 1) 4명 미만이면 아직 매칭 불가
+            // 2차 체크: 바깥에서 4명 이상이었더라도
+            // 이 시점에는 다른 스레드가 먼저 가져갔을 수 있으므로 다시 확인 필요
+            // 4명 미만이면 매칭 X
             if (queue.size() < 4) {
                 return null;
             }
 
-            // 2) FIFO 순서대로 앞에서 4명 추출
-            List<WaitingUser> matchedUsers = new ArrayList<>(4);
+            // FIFO 순서대로 앞에서 4명 추출
+            matchedUsers = new ArrayList<>(4);
             for (int i = 0; i < 4; i++) {
                 WaitingUser user = queue.pollFirst();
                 if (user != null) {
@@ -144,41 +157,41 @@ public class MatchingQueueService {
                 }
             }
 
-            // 3) 비정상 안전장치: 추출 인원이 4명 미만이면 원상복구 후 중단
+            // 비정상 안전장치: 추출 인원이 4명 미만이면 원상복구 후 중단
             if (matchedUsers.size() < 4) {
                 for (int i = matchedUsers.size() - 1; i >= 0; i--) {
                     queue.addFirst(matchedUsers.get(i));
                 }
                 return null;
             }
+        }
 
-            // 4) 방 생성 API에 넘길 참가자 ID 목록 생성
-            List<Long> participantIds =
-                    matchedUsers.stream().map(WaitingUser::getUserId).toList();
+        // 4) 방 생성 API에 넘길 참가자 ID 목록 생성
+        List<Long> participantIds =
+                matchedUsers.stream().map(WaitingUser::getUserId).toList();
 
-            try {
-                // 5) 문제 번호는 외부(찬의님 파트) 연동 함수에서 결정
-                Long problemId = resolveProblemIdForMatch(queueKey, participantIds);
+        try {
+            // 5) 문제 번호는 외부(찬의님 파트) 연동 함수에서 결정
+            Long problemId = resolveProblemIdForMatch(queueKey, participantIds);
 
-                // 6) 배틀룸 생성 요청 (MVP: maxPlayers=4 고정)
-                CreateRoomResponse response =
-                        battleRoomService.createRoom(new CreateRoomRequest(problemId, participantIds, 4));
+            // 6) 배틀룸 생성 요청 (MVP: maxPlayers=4 고정)
+            CreateRoomResponse response =
+                    battleRoomService.createRoom(new CreateRoomRequest(problemId, participantIds, 4));
 
-                // 7) 방 생성 성공 시에만 "유저-큐 맵"에서 매칭된 유저 제거
-                //    (실패했는데 먼저 제거하면 상태 꼬임 발생)
-                matchedUsers.forEach(user -> userQueueMap.remove(user.getUserId()));
+            // 7) 방 생성 성공 시에만 "유저-큐 맵"에서 매칭된 유저 제거
+            //    (실패했는데 먼저 제거하면 상태 꼬임 발생)
+            matchedUsers.forEach(user -> userQueueMap.remove(user.getUserId()));
 
-                // 8) 이 큐가 비었으면 waitingQueues 맵에서 키 제거(메모리 정리)
-                waitingQueues.computeIfPresent(queueKey, (k, q) -> q.isEmpty() ? null : q);
+            // 8) 이 큐가 비었으면 waitingQueues 맵에서 키 제거(메모리 정리)
+            waitingQueues.computeIfPresent(queueKey, (k, q) -> q.isEmpty() ? null : q);
 
-                return response;
-            } catch (RuntimeException e) {
-                // 9) 생성 실패 시 큐 원복: 뽑았던 4명을 원래 순서대로 되돌리기
-                for (int i = matchedUsers.size() - 1; i >= 0; i--) {
-                    queue.addFirst(matchedUsers.get(i));
-                }
-                throw e;
+            return response;
+        } catch (RuntimeException e) {
+            // 9) 생성 실패 시 큐 원복: 뽑았던 4명을 원래 순서대로 되돌리기
+            for (int i = matchedUsers.size() - 1; i >= 0; i--) {
+                queue.addFirst(matchedUsers.get(i));
             }
+            throw e;
         }
     }
 
