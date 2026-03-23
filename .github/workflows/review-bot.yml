@@ -362,6 +362,7 @@ jobs:
                   r'(?im)^(\s*[^#\n]{0,80}(?:token|secret|password|api[_-]?key|access[_-]?key|private[_-]?key)'
                   r'[^:=\n]{0,40}[:=]\s*)([^\n]+)$'
               )
+              template_expr_prefix = "$" + "{{"
 
               def mask_assignment(match):
                   nonlocal redaction_count
@@ -370,7 +371,7 @@ jobs:
                   lowered = raw_value.lower()
                   if not raw_value:
                       return match.group(0)
-                  if "${{" in raw_value or raw_value == "***":
+                  if template_expr_prefix in raw_value or raw_value == "***":
                       return match.group(0)
                   if "[redacted]" in lowered or "<redacted>" in lowered:
                       return match.group(0)
