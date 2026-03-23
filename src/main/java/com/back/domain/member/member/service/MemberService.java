@@ -19,29 +19,9 @@ public class MemberService {
 
     public RsData<Void> join(JoinRequest req) {
 
-        // 요청값 검증
-        if (req == null) {
-            throw new ServiceException("MEMBER_400", "요청 바디가 비어 있습니다");
-        }
-        if (req.email() == null || req.email().isBlank()) {
-            throw new ServiceException("MEMBER_400", "이메일은 필수 입력값입니다");
-        }
-        if (req.password() == null || req.password().isBlank()) {
-            throw new ServiceException("MEMBER_400", "비밀번호는 필수 입력값입니다");
-        }
-        if (req.name() == null || req.name().isBlank()) {
-            throw new ServiceException("MEMBER_400", "닉네임은 필수 입력값입니다");
-        }
-
         // 비밀번호 확인 일치 검증
         if (!req.password().equals(req.passwordConfirm())) {
             throw new ServiceException("MEMBER_400", "비밀번호와 비밀번호 확인이 일치하지 않습니다");
-        }
-
-        // 비밀번호 정책 검증 (8~12자, 영문+숫자+특수문자 모두 포함)
-        String passwordPattern = "^(?=.*[a-zA-Z])(?=.*\\d)(?=.*[!@#$%^&*()_+\\-=\\[\\]{};':\"\\\\|,.<>\\/?]).{8,12}$";
-        if (!req.password().matches(passwordPattern)) {
-            throw new ServiceException("MEMBER_400", "비밀번호는 8~12자이며 영문, 숫자, 특수문자를 모두 포함해야 합니다");
         }
 
         // 이메일 중복 체크
