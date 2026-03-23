@@ -44,13 +44,13 @@ public class ProblemPickQueryRepository {
     }
 
     public Optional<Long> findCandidateIdByOffset(
-            DifficultyLevel difficulty, String normalizedCategory, List<Long> excludeProblemIds, long offset) {
+            DifficultyLevel difficulty, String normalizedCategory, List<Long> excludeProblemIds, int offset) {
         // count 결과에서 뽑은 offset 위치의 후보 1건을 조회한다.
         TypedQuery<Long> query = entityManager
                 .createQuery(buildSelectJpql(excludeProblemIds), Long.class)
                 .setParameter("difficulty", difficulty)
                 .setParameter("category", normalizedCategory)
-                .setFirstResult(Math.toIntExact(offset))
+                .setFirstResult(offset)
                 .setMaxResults(1);
 
         if (!excludeProblemIds.isEmpty()) {

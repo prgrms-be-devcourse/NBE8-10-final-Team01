@@ -2,7 +2,7 @@ package com.back.domain.problem.pick.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.Mockito.anyLong;
+import static org.mockito.Mockito.anyInt;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -33,7 +33,7 @@ class ProblemPickServiceTest {
 
         when(queryRepository.countCandidates(DifficultyLevel.EASY, "array", List.of(10L)))
                 .thenReturn(1L);
-        when(queryRepository.findCandidateIdByOffset(DifficultyLevel.EASY, "array", List.of(10L), 0L))
+        when(queryRepository.findCandidateIdByOffset(DifficultyLevel.EASY, "array", List.of(10L), 0))
                 .thenReturn(Optional.of(42L));
 
         // when
@@ -42,7 +42,7 @@ class ProblemPickServiceTest {
         // then
         assertThat(problemId).isEqualTo(42L);
         verify(queryRepository).countCandidates(DifficultyLevel.EASY, "array", List.of(10L));
-        verify(queryRepository).findCandidateIdByOffset(DifficultyLevel.EASY, "array", List.of(10L), 0L);
+        verify(queryRepository).findCandidateIdByOffset(DifficultyLevel.EASY, "array", List.of(10L), 0);
     }
 
     @Test
@@ -51,7 +51,7 @@ class ProblemPickServiceTest {
         // given
         when(queryRepository.countCandidates(DifficultyLevel.EASY, "array", List.of()))
                 .thenReturn(1L);
-        when(queryRepository.findCandidateIdByOffset(DifficultyLevel.EASY, "array", List.of(), 0L))
+        when(queryRepository.findCandidateIdByOffset(DifficultyLevel.EASY, "array", List.of(), 0))
                 .thenReturn(Optional.of(7L));
 
         // when
@@ -60,7 +60,7 @@ class ProblemPickServiceTest {
         // then
         assertThat(problemId).isEqualTo(7L);
         verify(queryRepository).countCandidates(DifficultyLevel.EASY, "array", List.of());
-        verify(queryRepository).findCandidateIdByOffset(DifficultyLevel.EASY, "array", List.of(), 0L);
+        verify(queryRepository).findCandidateIdByOffset(DifficultyLevel.EASY, "array", List.of(), 0);
     }
 
     @Test
@@ -74,7 +74,7 @@ class ProblemPickServiceTest {
                 .thenReturn(0L);
         when(queryRepository.countCandidates(DifficultyLevel.MEDIUM, "graph", List.of()))
                 .thenReturn(1L);
-        when(queryRepository.findCandidateIdByOffset(eq(DifficultyLevel.MEDIUM), eq("graph"), eq(List.of()), anyLong()))
+        when(queryRepository.findCandidateIdByOffset(eq(DifficultyLevel.MEDIUM), eq("graph"), eq(List.of()), anyInt()))
                 .thenReturn(Optional.of(99L));
 
         // when
@@ -85,7 +85,7 @@ class ProblemPickServiceTest {
         verify(queryRepository).countCandidates(DifficultyLevel.MEDIUM, "graph", List.of(11L, 12L));
         verify(queryRepository).countCandidates(DifficultyLevel.MEDIUM, "graph", List.of());
         verify(queryRepository)
-                .findCandidateIdByOffset(eq(DifficultyLevel.MEDIUM), eq("graph"), eq(List.of()), anyLong());
+                .findCandidateIdByOffset(eq(DifficultyLevel.MEDIUM), eq("graph"), eq(List.of()), anyInt());
     }
 
     @Test
@@ -122,5 +122,20 @@ class ProblemPickServiceTest {
                 .hasMessage("카테고리는 필수입니다.");
 
         verifyNoInteractions(queryRepository);
+    }
+
+    @Test
+    @DisplayName("후보 수가 int 범위를 넘으면 명확한 예외를 던진다")
+    void pickProblemId_throws_whenCandidateCountExceedsIntRange() {
+        // given
+        ProblemPickRequest request = new ProblemPickRequest("Array", DifficultyLevel.EASY, List.of(), List.of());
+
+        when(queryRepository.countCandidates(DifficultyLevel.EASY, "array", List.of()))
+                .thenReturn((long) Integer.MAX_VALUE + 1);
+
+        // when & then
+        assertThatThrownBy(() -> problemPickService.pickProblemId(request))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("출제 후보 수가 너무 커 오프셋 계산이 불가능합니다.");
     }
 }

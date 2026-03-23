@@ -12,12 +12,11 @@ import org.springframework.stereotype.Service;
 import com.back.domain.battle.battleroom.dto.CreateRoomRequest;
 import com.back.domain.battle.battleroom.dto.CreateRoomResponse;
 import com.back.domain.battle.battleroom.service.BattleRoomService;
+import com.back.domain.matching.queue.adapter.QueueProblemPicker;
 import com.back.domain.matching.queue.dto.QueueJoinRequest;
 import com.back.domain.matching.queue.dto.QueueStatusResponse;
 import com.back.domain.matching.queue.model.QueueKey;
 import com.back.domain.matching.queue.model.WaitingUser;
-import com.back.domain.problem.pick.service.ProblemPickService;
-import com.back.domain.problem.problem.enums.DifficultyLevel;
 
 import lombok.RequiredArgsConstructor;
 
@@ -57,7 +56,7 @@ public class MatchingQueueService {
     // 매칭 성사 시 방 생성 호출용 서비스
     private final BattleRoomService battleRoomService;
 
-    private final ProblemPickService problemPickService;
+    private final QueueProblemPicker queueProblemPicker;
 
     public QueueStatusResponse joinQueue(Long userId, QueueJoinRequest request) {
         // 이미 대기열에 들어가 있는 유저는 다시 참가할 수 없다.
@@ -212,10 +211,7 @@ public class MatchingQueueService {
     }
 
     private Long resolveProblemIdForMatch(QueueKey queueKey, List<Long> participantIds) {
-        return problemPickService.pickProblemId(
-                queueKey.category(),
-                DifficultyLevel.valueOf(queueKey.difficulty().name()),
-                participantIds);
+        return queueProblemPicker.pick(queueKey, participantIds);
     }
 
     // 테스트에서 큐 정리 여부를 확인하기 위한 package-private 조회 메서드

@@ -18,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 public class ProblemPickService {
 
     private static final String NO_PROBLEM_MESSAGE = "출제 가능한 문제가 없습니다.";
+    private static final String TOO_MANY_CANDIDATES_MESSAGE = "출제 후보 수가 너무 커 오프셋 계산이 불가능합니다.";
 
     private final ProblemPickQueryRepository problemPickQueryRepository;
 
@@ -58,8 +59,12 @@ public class ProblemPickService {
             throw new IllegalStateException(NO_PROBLEM_MESSAGE);
         }
 
+        if (candidateCount > Integer.MAX_VALUE) {
+            throw new IllegalStateException(TOO_MANY_CANDIDATES_MESSAGE + " candidateCount=" + candidateCount);
+        }
+
         // ORDER BY random() 대신 offset 랜덤 방식으로 1건을 고른다.
-        long randomOffset = ThreadLocalRandom.current().nextLong(candidateCount);
+        int randomOffset = ThreadLocalRandom.current().nextInt((int) candidateCount);
 
         return problemPickQueryRepository
                 .findCandidateIdByOffset(difficulty, normalizedCategory, excludeProblemIds, randomOffset)
