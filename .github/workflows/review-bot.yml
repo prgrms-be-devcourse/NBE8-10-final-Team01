@@ -70,7 +70,9 @@ jobs:
       - name: Trim diff for token saving
         run: |
           python3 - <<'PY'
+          import json
           from pathlib import Path
+          from pathlib import PurePosixPath
 
           # 이전 단계에서 생성한 raw diff
           diff = Path("pr.diff").read_text(errors="ignore")
@@ -97,27 +99,46 @@ jobs:
               ".pdf"
           ]
 
+          def parse_path_from_header(header_line):
+              # 예: diff --git a/foo/bar.py b/foo/bar.py
+              parts = header_line.split()
+              if len(parts) < 4:
+                  return ""
+              right = parts[3]
+              if right.startswith("b/"):
+                  return right[2:]
+              return right
+
           filtered_lines = []
           current_block = []
+          current_path = ""
           skip_block = False
+          kept_paths = []
 
           for line in diff.splitlines():
               if line.startswith("diff --git "):
                   if current_block and not skip_block:
                       filtered_lines.extend(current_block)
+                      if current_path:
+                          kept_paths.append(current_path)
                   current_block = [line]
+                  current_path = parse_path_from_header(line)
                   skip_block = any(k in line for k in excluded_keywords)
               else:
                   current_block.append(line)
 
           if current_block and not skip_block:
               filtered_lines.extend(current_block)
+              if current_path:
+                  kept_paths.append(current_path)
 
           filtered = "\n".join(filtered_lines)
 
           # diff 길이 상한: 비용/지연 보호
           MAX_DIFF_CHARS = 15000
+          diff_was_clipped = False
           if len(filtered) > MAX_DIFF_CHARS:
+              diff_was_clipped = True
               # 글자 단위가 아닌 "라인 단위"로 자른다.
               # 문장 중간 절단으로 인한 오탐 코멘트를 줄이기 위함
               clipped_lines = []
@@ -130,9 +151,82 @@ jobs:
                   current_size += line_size
               filtered = "\n".join(clipped_lines)
 
+          # 화이트리스트 3종만 "파일 전체 본문"을 추가 제공
+          # 1) .github/workflows/**
+          # 2) Dockerfile*
+          # 3) 대표 CI 설정 파일
+          ci_config_files = {
+              ".gitlab-ci.yml",
+              ".travis.yml",
+              "azure-pipelines.yml",
+              "Jenkinsfile",
+              ".circleci/config.yml",
+              ".buildkite/pipeline.yml",
+          }
+
+          def is_full_context_target(path):
+              normalized = str(PurePosixPath(path))
+              name = PurePosixPath(normalized).name
+              if normalized.startswith(".github/workflows/"):
+                  return True
+              if name.startswith("Dockerfile"):
+                  return True
+              if normalized in ci_config_files:
+                  return True
+              return False
+
+          full_context_chunks = []
+          full_context_paths = []
+          full_context_was_clipped = False
+          max_full_context_chars = 120000
+          current_full_context_chars = 0
+
+          for rel_path in sorted(set(kept_paths)):
+              if not is_full_context_target(rel_path):
+                  continue
+
+              file_path = Path(rel_path)
+              if not file_path.exists() or file_path.is_dir():
+                  continue
+
+              try:
+                  content = file_path.read_text(errors="ignore")
+              except Exception:
+                  continue
+
+              chunk = (
+                  f"### FULL FILE: {rel_path}\n"
+                  "```text\n"
+                  f"{content}\n"
+                  "```\n"
+              )
+
+              chunk_size = len(chunk)
+              if current_full_context_chars + chunk_size > max_full_context_chars:
+                  full_context_was_clipped = True
+                  break
+
+              full_context_chunks.append(chunk)
+              full_context_paths.append(rel_path)
+              current_full_context_chars += chunk_size
+
+          full_context_text = "\n".join(full_context_chunks).strip()
+
           Path("pr_trimmed.diff").write_text(filtered)
+          Path("pr_full_context.txt").write_text(full_context_text)
+          Path("pr_context_meta.json").write_text(json.dumps({
+              "diff_was_clipped": diff_was_clipped,
+              "full_context_paths": full_context_paths,
+              "full_context_was_clipped": full_context_was_clipped,
+          }, ensure_ascii=False, indent=2))
           print("===== TRIMMED DIFF LENGTH =====")
           print(len(filtered))
+          print("===== FULL CONTEXT FILE COUNT =====")
+          print(len(full_context_paths))
+          if diff_was_clipped:
+              print("DIFF_WAS_CLIPPED=true")
+          if full_context_was_clipped:
+              print("FULL_CONTEXT_WAS_CLIPPED=true")
           PY
 
       - name: Ask OpenAI for structured review
@@ -197,6 +291,25 @@ jobs:
               write_review("OPENAI_API_KEY가 설정되지 않아 자동 인라인 리뷰를 생략했습니다.", fallback=True)
               raise SystemExit(0)
 
+          # 선택된 화이트리스트 파일(.github/workflows, Dockerfile, CI 설정)의 전체 본문
+          try:
+              full_context = Path("pr_full_context.txt").read_text(errors="ignore").strip()
+          except Exception:
+              full_context = ""
+
+          try:
+              context_meta = json.loads(Path("pr_context_meta.json").read_text(errors="ignore"))
+          except Exception:
+              context_meta = {}
+
+          context_meta_text = json.dumps(context_meta, ensure_ascii=False, indent=2)
+          full_context_section = ""
+          if full_context:
+              full_context_section = f"""
+              FULL FILE CONTEXT (Whitelist Only):
+              {full_context}
+              """
+
           # 응답 포맷 안정성을 위해 JSON 반환을 강하게 요구
           prompt = f"""
           너는 GitHub Pull Request 코드 리뷰어다.
@@ -233,9 +346,17 @@ jobs:
           9. issue/reason/suggestion에는 라벨("내용:", "근거:", "제안:")을 넣지 말고 본문만 작성
           10. suggestion은 불필요하면 생략 가능
           11. diff는 길이 제한으로 일부 생략될 수 있으니, 파일이 중간에 잘렸다는 유형의 추정 지적은 금지
+          12. CONTEXT META에서 diff_was_clipped=true 이면, 파일/잡/핸들러가 "없다"는 단정 지적은 금지
+          13. Full File Context가 제공된 파일은 해당 본문을 우선 기준으로 구조를 판단하라
+          14. 리뷰 문장은 한국어 존댓말로 작성하라 (반말 금지)
+
+          CONTEXT META:
+          {context_meta_text}
 
           PR DIFF:
           {diff}
+
+          {full_context_section}
           """
 
           # gpt-5.3-mini를 우선 시도하고, 실패 시 gpt-5-mini로 폴백
@@ -779,6 +900,7 @@ jobs:
               4) 1인칭 실행 주체("제가", "해드리겠습니다") 사용 금지.
               5) 확실하지 않으면 단정 대신 불확실성만 짧게 명시한다.
               6) 마크다운 코드블록은 사용하지 마라.
+              7) 답변은 반드시 존댓말(~요/~습니다)로 작성하고 반말은 금지한다.
 
               파일: {path}
               라인: {line}
@@ -872,6 +994,22 @@ jobs:
                   f"@{user_login} 코멘트 감사합니다. "
                   "이 답글은 코드 변경을 수행하지 않는 리뷰봇 설명 응답입니다. "
                   "기존 코멘트의 의도와 근거를 중심으로만 안내합니다."
+              )
+
+          # 존댓말 강제: 반말 패턴이 감지되거나 존댓말 표지가 없으면 안전 문구로 교체
+          informal_markers = [
+              "맞아", "아냐", "해줘", "해봐", "할게", "볼래", "어때", "그냥", "거든", "했어"
+          ]
+          polite_markers = ["요", "습니다", "드립니다", "해주세요", "바랍니다"]
+          if any(token in response_text for token in informal_markers):
+              response_text = (
+                  f"@{user_login} 코멘트 감사합니다. "
+                  "리뷰봇은 설명과 근거 안내만 제공하며, 해당 내용은 존댓말 기준으로 안내드립니다."
+              )
+          elif not any(token in response_text for token in polite_markers):
+              response_text = (
+                  f"@{user_login} 코멘트 감사합니다. "
+                  "리뷰봇 응답 톤 기준에 맞춰 존댓말로만 안내드립니다."
               )
 
           # 댓글 글자수 안전장치 (GitHub body 최대치 근접 보호)
