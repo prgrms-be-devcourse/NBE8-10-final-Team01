@@ -3,13 +3,17 @@ package com.back.domain.matching.queue.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -20,11 +24,21 @@ import com.back.domain.matching.queue.dto.QueueJoinRequest;
 import com.back.domain.matching.queue.dto.QueueStatusResponse;
 import com.back.domain.matching.queue.model.Difficulty;
 import com.back.domain.matching.queue.model.QueueKey;
+import com.back.domain.problem.pick.service.ProblemPickService;
+import com.back.domain.problem.problem.enums.DifficultyLevel;
 
 class MatchingQueueServiceTest {
 
     private final BattleRoomService battleRoomService = mock(BattleRoomService.class);
-    private final MatchingQueueService matchingQueueService = new MatchingQueueService(battleRoomService);
+    private final ProblemPickService problemPickService = mock(ProblemPickService.class);
+    private final MatchingQueueService matchingQueueService =
+            new MatchingQueueService(battleRoomService, problemPickService);
+
+    @BeforeEach
+    void setUp() {
+        when(problemPickService.pickProblemId(anyString(), any(DifficultyLevel.class), anyList()))
+                .thenReturn(1L);
+    }
 
     @Test
     @DisplayName("사용자는 카테고리와 난이도를 선택해 매칭 대기열에 참가할 수 있다")
@@ -128,6 +142,8 @@ class MatchingQueueServiceTest {
                 .createRoom(argThat(req -> req.problemId().equals(1L)
                         && req.maxPlayers() == 4
                         && req.participantIds().size() == 4));
+        verify(problemPickService, times(1))
+                .pickProblemId(eq("ARRAY"), eq(DifficultyLevel.EASY), argThat(ids -> ids.size() == 4));
         assertThat(fourthResponse.getWaitingCount()).isEqualTo(0);
         assertThat(matchingQueueService.hasQueue(new QueueKey("Array", Difficulty.EASY)))
                 .isFalse();

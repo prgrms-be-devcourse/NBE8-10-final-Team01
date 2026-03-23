@@ -16,6 +16,8 @@ import com.back.domain.matching.queue.dto.QueueJoinRequest;
 import com.back.domain.matching.queue.dto.QueueStatusResponse;
 import com.back.domain.matching.queue.model.QueueKey;
 import com.back.domain.matching.queue.model.WaitingUser;
+import com.back.domain.problem.pick.service.ProblemPickService;
+import com.back.domain.problem.problem.enums.DifficultyLevel;
 
 import lombok.RequiredArgsConstructor;
 
@@ -54,6 +56,8 @@ public class MatchingQueueService {
 
     // 매칭 성사 시 방 생성 호출용 서비스
     private final BattleRoomService battleRoomService;
+
+    private final ProblemPickService problemPickService;
 
     public QueueStatusResponse joinQueue(Long userId, QueueJoinRequest request) {
         // 이미 대기열에 들어가 있는 유저는 다시 참가할 수 없다.
@@ -207,14 +211,11 @@ public class MatchingQueueService {
         }
     }
 
-    // 찬의님 연동 지점 (여기만 나중에 연결하면 됨)
     private Long resolveProblemIdForMatch(QueueKey queueKey, List<Long> participantIds) {
-        // TODO: category/difficulty/참가자 정보를 바탕으로 problemId 반환
-        // 1) queueKey(category, difficulty)
-        // 2) participantIds(4명)
-        // 를 찬의님 서비스/함수로 전달해서 problemId를 받아오도록 구현
-        return 1L; // TODO: 현재는 1번만 가능
-        // throw new IllegalStateException("문제 번호 연동이 아직 구현되지 않았습니다.");
+        return problemPickService.pickProblemId(
+                queueKey.category(),
+                DifficultyLevel.valueOf(queueKey.difficulty().name()),
+                participantIds);
     }
 
     // 테스트에서 큐 정리 여부를 확인하기 위한 package-private 조회 메서드
