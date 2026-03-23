@@ -22,8 +22,9 @@ public class ProblemService {
             throw new ServiceException("400-1", "문제 ID는 필수입니다.");
         }
 
-        Problem problem =
-                problemRepository.findById(problemId).orElseThrow(() -> new ServiceException("404-1", "존재하지 않는 문제입니다."));
+        Problem problem = problemRepository
+                .findById(problemId)
+                .orElseThrow(() -> new ServiceException("404-1", "존재하지 않는 문제입니다."));
 
         return ProblemDetailResponse.from(problem);
     }
