@@ -39,7 +39,7 @@ public class Member extends BaseEntity {
     public void applyScore(long delta) {
         this.score = (this.score == null ? 0L : this.score) + delta;
     }
-  
+
     public Member(String nickname, String email, String encodedPassword) {
         this.nickname = nickname;
         this.email = email;
