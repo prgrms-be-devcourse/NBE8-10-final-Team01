@@ -622,6 +622,10 @@ jobs:
             const now = Date.now();
             // 너무 오래된 스레드는 재사용하지 않음
             const replyWindowMs = 1000 * 60 * 60 * 24 * 14;
+            const isWithinReplyWindow = (rc) => {
+              const createdAt = new Date(rc.created_at).getTime();
+              return Number.isFinite(createdAt) && now - createdAt <= replyWindowMs;
+            };
 
             let existingReviewComments = [];
             try {
@@ -647,8 +651,7 @@ jobs:
               }
 
               // 오래된 스레드는 재활용하지 않음
-              const createdAt = new Date(rc.created_at).getTime();
-              if (Number.isFinite(createdAt) && now - createdAt > replyWindowMs) {
+              if (!isWithinReplyWindow(rc)) {
                 return false;
               }
 
@@ -677,11 +680,30 @@ jobs:
               ));
             };
 
+            const hasExistingTopLevelAtLocation = (path, line) => {
+              return existingReviewComments.some(rc => (
+                !rc.in_reply_to_id &&
+                rc.user &&
+                rc.user.login === botLogin &&
+                rc.path === path &&
+                resolveLine(rc) === line &&
+                isWithinReplyWindow(rc) &&
+                !(Object.prototype.hasOwnProperty.call(rc, 'position') && rc.position === null)
+              ));
+            };
+
             let created = 0;
             let replied = 0;
             let skipped = 0;
             let failed = 0;
             for (const c of comments) {
+              // 동일 위치에 활성 스레드가 이미 있으면 새 코멘트/리플을 만들지 않는다.
+              // (동일 지적이 synchronize마다 누적되는 현상 방지)
+              if (hasExistingTopLevelAtLocation(c.path, c.line)) {
+                skipped += 1;
+                continue;
+              }
+
               const target = findReplyTarget(c.path, c.line);
               if (target) {
                 if (hasSameReply(target.id, c.body)) {
@@ -884,6 +906,29 @@ jobs:
                   "### AI Review Thread Reply",
                   "- status: skipped",
                   "- reason: missing event fields",
+              ])
+              raise SystemExit(0)
+
+          # "수정 완료/해결" 성격의 확인 댓글에는 봇이 추가 답글을 달지 않는다.
+          user_body_lower = user_body.lower()
+          resolved_markers = [
+              "resolved",
+              "fixed",
+              "done",
+              "수정완료",
+              "수정 완료",
+              "반영완료",
+              "반영 완료",
+              "해결완료",
+              "해결 완료",
+              "처리완료",
+              "처리 완료",
+          ]
+          if any(marker in user_body_lower for marker in resolved_markers):
+              append_summary([
+                  "### AI Review Thread Reply",
+                  "- status: skipped",
+                  "- reason: user marked thread as resolved",
               ])
               raise SystemExit(0)
 

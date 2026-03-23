@@ -1,5 +1,7 @@
 package com.back.domain.problem.problem.service;
 
+import java.util.NoSuchElementException;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,7 +24,7 @@ public class ProblemService {
         }
 
         Problem problem =
-                problemRepository.findById(problemId).orElseThrow(() -> new IllegalArgumentException("존재하지 않는 문제입니다."));
+                problemRepository.findById(problemId).orElseThrow(() -> new NoSuchElementException("존재하지 않는 문제입니다."));
 
         return ProblemDetailResponse.from(problem);
     }
