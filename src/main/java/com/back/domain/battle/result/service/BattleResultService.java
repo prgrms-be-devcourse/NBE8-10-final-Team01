@@ -1,10 +1,12 @@
 package com.back.domain.battle.result.service;
 
+import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
@@ -25,7 +27,9 @@ import com.back.domain.problem.submission.entity.SubmissionResult;
 import com.back.domain.problem.submission.repository.SubmissionRepository;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class BattleResultService {
@@ -58,13 +62,17 @@ public class BattleResultService {
         // 2. 모든 참여자 조회
         List<BattleParticipant> participants = battleParticipantRepository.findByBattleRoom(room);
 
-        // 3. 순위 정렬
+        // 3. 각 참여자 score 미리 계산 (DB 쿼리를 정렬 전에 한 번씩만 실행)
+        //    Comparator 안에서 calcScore() 호출 시 O(N log N) 횟수만큼 DB 조회가 발생하는 문제 방지
+        Map<Long, Long> scoreMap =
+                participants.stream().collect(Collectors.toMap(BattleParticipant::getId, p -> calcScore(p, room)));
+
+        // 4. score 기준 정렬 (in-memory, DB 쿼리 없음)
         //    AC 참여자: score = 소요시간(초) + WA 패널티(회 * 20초) → 낮을수록 좋음
         //    미통과 참여자: score = Long.MAX_VALUE → 항상 뒤로 밀림
         List<BattleParticipant> sorted = participants.stream()
-                .sorted(Comparator.comparingLong((BattleParticipant p) -> calcScore(p, room))
-                        .thenComparing(
-                                p -> p.getFinishTime() != null ? p.getFinishTime() : java.time.LocalDateTime.MAX))
+                .sorted(Comparator.comparingLong((BattleParticipant p) -> scoreMap.get(p.getId()))
+                        .thenComparing(p -> p.getFinishTime() != null ? p.getFinishTime() : LocalDateTime.MAX))
                 .toList();
 
         // 4. 등수 & 점수 부여
@@ -118,8 +126,7 @@ public class BattleResultService {
 
         return playingRooms.stream()
                 .map(room -> {
-                    int currentPlayers =
-                            battleParticipantRepository.findByBattleRoom(room).size();
+                    int currentPlayers = (int) battleParticipantRepository.countByBattleRoom(room);
                     return RoomListResponse.from(room, currentPlayers);
                 })
                 .toList();
@@ -154,6 +161,15 @@ public class BattleResultService {
      */
     private long calcScore(BattleParticipant participant, BattleRoom room) {
         if (participant.getStatus() != BattleParticipantStatus.EXIT) {
+            return Long.MAX_VALUE;
+        }
+
+        // null 방어: 정상 흐름에서는 발생하지 않지만 데이터 이상 시 정산 전체가 실패하는 것을 방지
+        if (room.getStartedAt() == null || participant.getFinishTime() == null) {
+            log.warn(
+                    "startedAt 또는 finishTime이 null - 미통과로 처리. roomId={}, participantId={}",
+                    room.getId(),
+                    participant.getId());
             return Long.MAX_VALUE;
         }
 
