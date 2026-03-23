@@ -24,6 +24,11 @@ public class MemberService {
 
     public RsData<Void> join(@Valid JoinRequest req) {
 
+        // req null 방어
+        if (req == null) {
+            throw new ServiceException("MEMBER_400", "요청 바디가 비어 있습니다");
+        }
+
         // 비밀번호 확인 일치 검증
         if (!req.password().equals(req.passwordConfirm())) {
             throw new ServiceException("MEMBER_400-1", "비밀번호와 비밀번호 확인이 일치하지 않습니다");
