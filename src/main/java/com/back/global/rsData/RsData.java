@@ -14,7 +14,8 @@ public record RsData<T>(String resultCode, @JsonIgnore int statusCode, String ms
             try {
                 int n = Integer.parseInt(part);
                 if (n >= 100 && n < 600) return n;
-            } catch (NumberFormatException ignored) {}
+            } catch (NumberFormatException ignored) {
+            }
         }
         return 500;
     }
