@@ -14,4 +14,7 @@ public interface BattleParticipantRepository extends JpaRepository<BattlePartici
     List<BattleParticipant> findByBattleRoom(BattleRoom battleRoom);
 
     Optional<BattleParticipant> findByBattleRoomAndMember(BattleRoom battleRoom, Member member);
+
+    // 방별 참여자 수 조회 (N+1 방지용 - 전체 로드 없이 COUNT만 조회)
+    long countByBattleRoom(BattleRoom battleRoom);
 }

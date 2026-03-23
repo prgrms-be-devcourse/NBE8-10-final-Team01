@@ -54,6 +54,10 @@ public class Member extends BaseEntity {
         this.role = (role != null) ? role : Role.USER;
         this.score = 0L; // 초기값 설정
     }
+      
+    public void applyScore(long delta) {
+        this.score = (this.score == null ? 0L : this.score) + delta;
+    }
 
     public static Member createUser(String nickname, String email, String encodedPassword) {
         // 이메일 정규화 (앞뒤 공백 제거 및 소문자 변환)

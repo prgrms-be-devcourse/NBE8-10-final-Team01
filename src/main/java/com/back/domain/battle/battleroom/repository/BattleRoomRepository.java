@@ -12,4 +12,7 @@ public interface BattleRoomRepository extends JpaRepository<BattleRoom, Long> {
 
     // 타이머 만료된 진행중 방 조회 (스케줄러용)
     List<BattleRoom> findByStatusAndTimerEndBefore(BattleRoomStatus status, LocalDateTime now);
+
+    // 특정 상태의 방 목록 조회 (관전용)
+    List<BattleRoom> findByStatus(BattleRoomStatus status);
 }
