@@ -78,17 +78,21 @@ jobs:
           diff = Path("pr.diff").read_text(errors="ignore")
 
           # 리뷰 가치가 낮거나 noise가 큰 파일 패턴은 제외
-          excluded_keywords = [
+          excluded_file_names = {
               "package-lock.json",
               "pnpm-lock.yaml",
               "yarn.lock",
               "bun.lockb",
-              ".next/",
-              "dist/",
-              "build/",
-              "coverage/",
-              ".gradle/",
-              ".idea/",
+          }
+          excluded_dir_names = {
+              ".next",
+              "dist",
+              "build",
+              "coverage",
+              ".gradle",
+              ".idea",
+          }
+          excluded_extensions = (
               ".png",
               ".jpg",
               ".jpeg",
@@ -96,21 +100,64 @@ jobs:
               ".svg",
               ".webp",
               ".ico",
-              ".pdf"
-          ]
+              ".pdf",
+          )
 
-          def parse_path_from_header(header_line):
+          def normalize_quoted_path(value):
+              text = str(value or "").strip()
+              # git diff 헤더 경로가 따옴표로 감싸진 경우를 정리
+              if len(text) >= 2 and text[0] == '"' and text[-1] == '"':
+                  text = text[1:-1]
+                  text = text.replace('\\"', '"').replace('\\\\', '\\')
+              return text
+
+          def parse_paths_from_header(header_line):
               # 예: diff --git a/foo/bar.py b/foo/bar.py
-              parts = header_line.split()
-              if len(parts) < 4:
-                  return ""
-              right = parts[3]
-              if right.startswith("b/"):
-                  return right[2:]
-              return right
+              prefix = "diff --git "
+              if not header_line.startswith(prefix):
+                  return "", ""
+
+              payload = header_line[len(prefix):]
+              if not payload.startswith("a/"):
+                  return "", ""
+
+              body = payload[2:]
+              if " b/" not in body:
+                  return "", ""
+
+              # 공백이 포함된 파일명도 깨지지 않도록 마지막 " b/" 기준 분리
+              left, right = body.rsplit(" b/", 1)
+              return normalize_quoted_path(left), normalize_quoted_path(right)
+
+          def choose_primary_path(old_path, new_path):
+              if new_path and new_path not in {"/dev/null", "dev/null"}:
+                  return new_path
+              if old_path and old_path not in {"/dev/null", "dev/null"}:
+                  return old_path
+              return ""
+
+          def should_exclude_path(path):
+              normalized = str(PurePosixPath(str(path or ""))).strip().lower()
+              if not normalized or normalized in {"/dev/null", "dev/null"}:
+                  return False
+
+              posix_path = PurePosixPath(normalized)
+              file_name = posix_path.name
+              if file_name in excluded_file_names:
+                  return True
+              if file_name.endswith(excluded_extensions):
+                  return True
+
+              for segment in posix_path.parts:
+                  if segment in excluded_dir_names:
+                      return True
+
+              return False
 
           filtered_lines = []
           current_block = []
+          current_old_path = ""
+          current_new_path = ""
           current_path = ""
           skip_block = False
           kept_paths = []
@@ -122,8 +169,9 @@ jobs:
                       if current_path:
                           kept_paths.append(current_path)
                   current_block = [line]
-                  current_path = parse_path_from_header(line)
-                  skip_block = any(k in line for k in excluded_keywords)
+                  current_old_path, current_new_path = parse_paths_from_header(line)
+                  current_path = choose_primary_path(current_old_path, current_new_path)
+                  skip_block = should_exclude_path(current_old_path) or should_exclude_path(current_new_path)
               else:
                   current_block.append(line)
 
