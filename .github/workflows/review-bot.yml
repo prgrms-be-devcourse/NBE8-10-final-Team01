@@ -23,7 +23,8 @@ permissions:
 
 concurrency:
   # 같은 PR에서 중복 실행 경합을 막고, 최신 실행만 남김
-  group: ai-review-bot-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # pull_request / pull_request_review_comment 런이 서로 취소시키지 않도록 event_name 분리
+  group: ai-review-bot-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -294,6 +295,7 @@ jobs:
           python3 - <<'PY'
           import json
           import os
+          import re
           import time
           from pathlib import Path
           from urllib.error import HTTPError, URLError
@@ -328,6 +330,56 @@ jobs:
                   print("===== REVIEW RESULT JSON =====")
               print(json.dumps(payload, ensure_ascii=False, indent=2))
 
+          def redact_secrets(text):
+              value = str(text or "")
+              if not value:
+                  return value, 0
+
+              redacted = value
+              redaction_count = 0
+
+              token_patterns = [
+                  (re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b"), "[REDACTED_GITHUB_TOKEN]"),
+                  (re.compile(r"\bsk-[A-Za-z0-9]{20,}\b"), "[REDACTED_API_KEY]"),
+                  (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "[REDACTED_AWS_ACCESS_KEY_ID]"),
+                  (
+                      re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9._-]{8,}\.[A-Za-z0-9._-]{8,}\b"),
+                      "[REDACTED_JWT]",
+                  ),
+                  (
+                      re.compile(
+                          r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"
+                      ),
+                      "[REDACTED_PRIVATE_KEY]",
+                  ),
+              ]
+
+              for pattern, replacement in token_patterns:
+                  redacted, hit = pattern.subn(replacement, redacted)
+                  redaction_count += hit
+
+              assignment_pattern = re.compile(
+                  r'(?im)^(\s*[^#\n]{0,80}(?:token|secret|password|api[_-]?key|access[_-]?key|private[_-]?key)'
+                  r'[^:=\n]{0,40}[:=]\s*)([^\n]+)$'
+              )
+
+              def mask_assignment(match):
+                  nonlocal redaction_count
+                  prefix = match.group(1)
+                  raw_value = (match.group(2) or "").strip()
+                  lowered = raw_value.lower()
+                  if not raw_value:
+                      return match.group(0)
+                  if "${{" in raw_value or raw_value == "***":
+                      return match.group(0)
+                  if "[redacted]" in lowered or "<redacted>" in lowered:
+                      return match.group(0)
+                  redaction_count += 1
+                  return f"{prefix}[REDACTED]"
+
+              redacted = assignment_pattern.sub(mask_assignment, redacted)
+              return redacted, redaction_count
+
 
           try:
               diff = Path("pr_trimmed.diff").read_text(errors="ignore").strip()
@@ -357,6 +409,12 @@ jobs:
               context_meta = json.loads(Path("pr_context_meta.json").read_text(errors="ignore"))
           except Exception:
               context_meta = {}
+
+          diff, diff_redaction_count = redact_secrets(diff)
+          full_context, full_context_redaction_count = redact_secrets(full_context)
+          total_redaction_count = diff_redaction_count + full_context_redaction_count
+          if total_redaction_count > 0:
+              add_warning(f"OpenAI 전송 전 민감 문자열 {total_redaction_count}건을 마스킹 처리했습니다.")
 
           context_meta_text = json.dumps(context_meta, ensure_ascii=False, indent=2)
           full_context_section = ""
@@ -792,7 +850,7 @@ jobs:
 
   reply_to_thread:
     # 사용자가 리뷰봇 인라인 코멘트 스레드에 단 리플에만 응답
-    if: github.event_name == 'pull_request_review_comment' && github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository && github.event.comment.user.login != 'github-actions[bot]' && github.event.comment.in_reply_to_id != null
+    if: github.event_name == 'pull_request_review_comment' && github.event.pull_request.state == 'open' && github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository && github.event.comment.in_reply_to_id != null
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -906,6 +964,14 @@ jobs:
                   "### AI Review Thread Reply",
                   "- status: skipped",
                   "- reason: missing event fields",
+              ])
+              raise SystemExit(0)
+
+          if user_login == bot_login:
+              append_summary([
+                  "### AI Review Thread Reply",
+                  "- status: skipped",
+                  "- reason: commenter is bot",
               ])
               raise SystemExit(0)
 

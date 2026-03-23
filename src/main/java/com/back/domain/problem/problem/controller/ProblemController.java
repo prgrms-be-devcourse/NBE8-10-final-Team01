@@ -18,7 +18,7 @@ public class ProblemController {
     private final ProblemService problemService;
 
     @GetMapping("/{problemId}")
-    public ProblemDetailResponse getProblem(@PathVariable Long problemId) {
+    public ProblemDetailResponse getProblem(@PathVariable("problemId") Long problemId) {
         return problemService.getProblem(problemId);
     }
 }
