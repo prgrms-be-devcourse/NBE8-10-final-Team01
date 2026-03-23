@@ -9,6 +9,7 @@ import com.back.domain.member.member.repository.MemberRepository;
 import com.back.global.exception.ServiceException;
 import com.back.global.rsData.RsData;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 @Service
@@ -17,7 +18,7 @@ public class MemberService {
     private final MemberRepository memberRepository;
     private final PasswordEncoder passwordEncoder;
 
-    public RsData<Void> join(JoinRequest req) {
+    public RsData<Void> join(@Valid JoinRequest req) {
 
         // 비밀번호 확인 일치 검증
         if (!req.password().equals(req.passwordConfirm())) {
