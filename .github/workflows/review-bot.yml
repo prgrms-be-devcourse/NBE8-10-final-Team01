@@ -583,7 +583,7 @@ jobs:
 
   reply_to_thread:
     # 사용자가 리뷰봇 인라인 코멘트 스레드에 단 리플에만 응답
-    if: github.event_name == 'pull_request_review_comment' && github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository && github.event.comment.user.login != env.REVIEW_BOT_LOGIN && github.event.comment.in_reply_to_id
+    if: github.event_name == 'pull_request_review_comment' && github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository && github.event.comment.user.login != 'github-actions[bot]' && github.event.comment.in_reply_to_id != null
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
