@@ -14,6 +14,7 @@ import com.back.domain.battle.battleroom.dto.CreateRoomResponse;
 import com.back.domain.battle.battleroom.service.BattleRoomService;
 import com.back.domain.matching.queue.adapter.QueueProblemPicker;
 import com.back.domain.matching.queue.dto.QueueJoinRequest;
+import com.back.domain.matching.queue.dto.QueueStateResponse;
 import com.back.domain.matching.queue.dto.QueueStatusResponse;
 import com.back.domain.matching.queue.model.QueueKey;
 import com.back.domain.matching.queue.model.WaitingUser;
@@ -210,6 +211,34 @@ public class MatchingQueueService {
         }
     }
 
+    public QueueStateResponse getMyQueueState(Long userId) {
+        QueueKey queueKey = userQueueMap.get(userId);
+
+        // 현재 어떤 큐에도 들어가 있지 않으면 false 반환
+        if (queueKey == null) {
+            return new QueueStateResponse(false, null, null, 0);
+        }
+
+        Deque<WaitingUser> queue = waitingQueues.get(queueKey);
+
+        // 맵에는 있는데 실제 큐가 없으면 비정상 상태지만, 조회는 안전하게 false 처리
+        // 불일치 발견: userQueueMap에는 있으나 실제 대기열(waitingQueues)에는 없음
+        if (queue == null) {
+            // 원자적으로 제거 (내가 확인했던 그 queueKey일 때만 제거하여 동시성 이슈 방지)
+            userQueueMap.remove(userId, queueKey);
+
+            // 로그를 남겨 추적 가능하게 함
+            // log.warn("Inconsistency detected: User {} was in userQueueMap but queue {} was missing. Cleaned up.",
+            // userId, queueKey);
+
+            return new QueueStateResponse(false, null, null, 0);
+        }
+
+        return new QueueStateResponse(
+                true, queueKey.category(), queueKey.difficulty().name(), queue.size());
+    }
+
+    // 찬의님 연동 지점 (여기만 나중에 연결하면 됨)
     private Long resolveProblemIdForMatch(QueueKey queueKey, List<Long> participantIds) {
         return queueProblemPicker.pick(queueKey, participantIds);
     }
