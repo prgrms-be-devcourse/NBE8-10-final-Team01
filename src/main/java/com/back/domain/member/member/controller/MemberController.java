@@ -9,6 +9,7 @@ import com.back.domain.member.member.dto.JoinRequest;
 import com.back.domain.member.member.service.MemberService;
 import com.back.global.rsData.RsData;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 @RestController
@@ -19,7 +20,7 @@ public class MemberController {
 
     // 회원가입
     @PostMapping("/join")
-    public RsData<Void> join(@RequestBody JoinRequest req) {
+    public RsData<Void> join(@Valid @RequestBody JoinRequest req) {
         RsData<Void> res = memberService.join(req);
         return res;
     }
