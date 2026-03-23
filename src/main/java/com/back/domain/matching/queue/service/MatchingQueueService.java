@@ -13,6 +13,7 @@ import com.back.domain.battle.battleroom.dto.CreateRoomRequest;
 import com.back.domain.battle.battleroom.dto.CreateRoomResponse;
 import com.back.domain.battle.battleroom.service.BattleRoomService;
 import com.back.domain.matching.queue.dto.QueueJoinRequest;
+import com.back.domain.matching.queue.dto.QueueStateResponse;
 import com.back.domain.matching.queue.dto.QueueStatusResponse;
 import com.back.domain.matching.queue.model.QueueKey;
 import com.back.domain.matching.queue.model.WaitingUser;
@@ -205,6 +206,25 @@ public class MatchingQueueService {
             }
             throw e;
         }
+    }
+
+    public QueueStateResponse getMyQueueState(Long userId) {
+        QueueKey queueKey = userQueueMap.get(userId);
+
+        // 현재 어떤 큐에도 들어가 있지 않으면 false 반환
+        if (queueKey == null) {
+            return new QueueStateResponse(false, null, null, 0);
+        }
+
+        Deque<WaitingUser> queue = waitingQueues.get(queueKey);
+
+        // 맵에는 있는데 실제 큐가 없으면 비정상 상태지만, 조회는 안전하게 false 처리
+        if (queue == null) {
+            return new QueueStateResponse(false, null, null, 0);
+        }
+
+        return new QueueStateResponse(
+                true, queueKey.category(), queueKey.difficulty().name(), queue.size());
     }
 
     // 찬의님 연동 지점 (여기만 나중에 연결하면 됨)
