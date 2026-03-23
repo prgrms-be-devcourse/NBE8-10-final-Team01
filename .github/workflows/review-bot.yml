@@ -30,6 +30,7 @@ jobs:
   review:
     # draft PR / fork PR은 건너뜀 (fork에는 secret 미주입)
     # pull_request 이벤트에서만 실행
+    # pull_request_review_comment 이벤트 처리는 아래 reply_to_thread job이 담당
     if: github.event_name == 'pull_request' && github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -373,6 +374,10 @@ jobs:
             }
 
             const pr = context.payload.pull_request;
+            if (!pr || !pr.number || !pr.head || !pr.head.sha) {
+              core.warning('pull_request payload가 없어 인라인 코멘트 생성을 건너뜁니다.');
+              return;
+            }
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const pull_number = pr.number;
