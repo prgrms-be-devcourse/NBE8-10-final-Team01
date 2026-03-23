@@ -9,8 +9,8 @@ env:
 
 on:
   pull_request:
-    # PR 생성 / 커밋 추가 / 다시 열기 / draft 해제 시 실행
-    types: [opened, synchronize, reopened, ready_for_review]
+    # PR 생성 / 다시 열기 / draft 해제 시 실행 (커밋 추가 synchronize는 자동 리뷰 제외)
+    types: [opened, reopened, ready_for_review]
   pull_request_review_comment:
     # 리뷰 코멘트 스레드에 새 댓글(리플)이 달릴 때 실행
     types: [created]
@@ -450,7 +450,7 @@ jobs:
           }}
 
           규칙:
-          1. comments는 최대 5개
+          1. comments는 최대 3개
           2. severity는 critical, high, medium, low 중 하나만 사용
           3. 반드시 diff에 존재하는 파일만 사용
           4. line은 '새 코드 기준 라인 번호'를 사용
@@ -575,8 +575,8 @@ jobs:
           if "comments" not in parsed or not isinstance(parsed["comments"], list):
               parsed["comments"] = []
 
-          # 최대 5개로 제한
-          parsed["comments"] = parsed["comments"][:5]
+          # 최대 3개로 제한
+          parsed["comments"] = parsed["comments"][:3]
 
           write_review(parsed["summary"], parsed["comments"], model_used=model_used)
           PY
@@ -674,7 +674,7 @@ jobs:
                 suggestion: c.suggestion,
                 body: buildBody(c)
               }))
-              .slice(0, 5);
+              .slice(0, 3);
 
             const resolveLine = (reviewComment) => Number(reviewComment.line ?? reviewComment.original_line ?? -1);
             const descByCreatedAt = (a, b) => new Date(b.created_at) - new Date(a.created_at);
