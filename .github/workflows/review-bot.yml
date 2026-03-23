@@ -1,36 +1,67 @@
 name: AI PR Inline Review Bot
 
+env:
+  # 봇 작성자 식별자. 추후 GitHub App 계정으로 바뀌면 여기만 바꾸면 됨
+  REVIEW_BOT_LOGIN: github-actions[bot]
+  # 스레드 자동응답 프롬프트에 들어갈 최대 길이(비용/타임아웃 보호)
+  REVIEW_BOT_MAX_PARENT_BODY_CHARS: "4000"
+  REVIEW_BOT_MAX_USER_BODY_CHARS: "4000"
+
 on:
   pull_request:
     # PR 생성 / 커밋 추가 / 다시 열기 / draft 해제 시 실행
     types: [opened, synchronize, reopened, ready_for_review]
+  pull_request_review_comment:
+    # 리뷰 코멘트 스레드에 새 댓글(리플)이 달릴 때 실행
+    types: [created]
 
 permissions:
   # 코드/PR diff 읽기
   contents: read
-  # PR 리뷰 코멘트 작성
+  # 인라인 코멘트 작성/리플 작성
   pull-requests: write
+
+concurrency:
+  # 같은 PR에서 중복 실행 경합을 막고, 최신 실행만 남김
+  group: ai-review-bot-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   review:
     # draft PR / fork PR은 건너뜀 (fork에는 secret 미주입)
-    if: github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository
+    # pull_request 이벤트에서만 실행
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Get PR diff
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.url }}
         run: |
-          # PR diff 저장
-          curl -L \
+          # PR diff 수집
+          set +e
+          curl -fsS -L \
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github.v3.diff" \
-            "$PR_URL" > pr.diff
+            "$PR_URL" -o pr.diff
+          curl_status=$?
+          set -e
+
+          if [ "$curl_status" -ne 0 ]; then
+            echo "::warning::PR diff 수집에 실패했습니다(curl exit=$curl_status). 이번 런에서는 리뷰를 생략합니다."
+            : > pr.diff
+          fi
+
+          # 에러 JSON/HTML 같은 비-diff payload 보호
+          if ! grep -q '^diff --git ' pr.diff; then
+            echo "::warning::수집된 payload가 git diff 형식이 아니어서 리뷰를 생략합니다."
+            : > pr.diff
+          fi
 
           echo "===== RAW DIFF SIZE ====="
           wc -c pr.diff
@@ -40,12 +71,10 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
+          # 이전 단계에서 생성한 raw diff
           diff = Path("pr.diff").read_text(errors="ignore")
 
-          # ---------------------------
-          # 수정 포인트 1
-          # 리뷰 제외 파일들
-          # ---------------------------
+          # 리뷰 가치가 낮거나 noise가 큰 파일 패턴은 제외
           excluded_keywords = [
               "package-lock.json",
               "pnpm-lock.yaml",
@@ -85,15 +114,11 @@ jobs:
 
           filtered = "\n".join(filtered_lines)
 
-          # ---------------------------
-          # 수정 포인트 2
-          # diff 최대 길이
-          # 너무 키우면 비용 증가
-          # ---------------------------
+          # diff 길이 상한: 비용/지연 보호
           MAX_DIFF_CHARS = 15000
           if len(filtered) > MAX_DIFF_CHARS:
-              # 중간 글자 단위로 자르면 잘못된 리뷰(예: "파일이 중간에 잘렸다")가 늘어난다.
-              # 라인 단위로만 자르되, 마지막 줄은 항상 완전한 줄만 유지한다.
+              # 글자 단위가 아닌 "라인 단위"로 자른다.
+              # 문장 중간 절단으로 인한 오탐 코멘트를 줄이기 위함
               clipped_lines = []
               current_size = 0
               for line in filtered.splitlines():
@@ -110,11 +135,9 @@ jobs:
           PY
 
       - name: Ask OpenAI for structured review
+        continue-on-error: true
         env:
-          # ---------------------------
-          # 수정 포인트 3
-          # 시크릿 이름 확인
-          # ---------------------------
+          # 필수 시크릿
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           python3 - <<'PY'
@@ -125,21 +148,55 @@ jobs:
           from urllib.error import HTTPError, URLError
           from urllib.request import Request, urlopen
 
-          diff = Path("pr_trimmed.diff").read_text(errors="ignore").strip()
+          warnings = []
 
-          if not diff:
-              result = {
-                  "summary": "변경 내용이 너무 작거나 제외 대상 파일만 있어 리뷰를 생략했습니다.",
-                  "comments": []
+          def add_warning(message):
+              # 중복 warning 제거 + Actions annotation 출력
+              normalized = " ".join(str(message).split())
+              if normalized not in warnings:
+                  warnings.append(normalized)
+              print(f"::warning::{normalized}")
+
+          def write_review(summary, comments=None, fallback=False, model_used=None):
+              # 다음 step(JS)에서 읽을 단일 결과 파일
+              payload = {
+                  "summary": summary,
+                  "comments": comments if isinstance(comments, list) else [],
+                  "meta": {
+                      "status": "fallback" if fallback else "ok",
+                      "model_used": model_used,
+                      "warnings": warnings,
+                  }
               }
-              Path("review_result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2))
+              Path("review_result.json").write_text(
+                  json.dumps(payload, ensure_ascii=False, indent=2)
+              )
+              if fallback:
+                  print("===== REVIEW RESULT JSON (FALLBACK) =====")
+              else:
+                  print("===== REVIEW RESULT JSON =====")
+              print(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+          try:
+              diff = Path("pr_trimmed.diff").read_text(errors="ignore").strip()
+          except Exception as e:
+              add_warning(f"리뷰 diff 파일 읽기 실패: {e}")
+              write_review(f"리뷰 diff 파일을 읽지 못해 자동 리뷰를 생략했습니다. ({e})", fallback=True)
               raise SystemExit(0)
 
-          # ---------------------------
-          # 수정 포인트 4
-          # 프롬프트
-          # 반드시 JSON만 반환하게 강하게 제한
-          # ---------------------------
+          if not diff:
+              add_warning("검토 가능한 diff가 없어 AI 리뷰를 생략했습니다.")
+              write_review("변경 내용이 너무 작거나 제외 대상 파일만 있어 리뷰를 생략했습니다.")
+              raise SystemExit(0)
+
+          api_key = os.getenv("OPENAI_API_KEY", "").strip()
+          if not api_key:
+              add_warning("OPENAI_API_KEY 누락으로 AI 리뷰를 생략했습니다.")
+              write_review("OPENAI_API_KEY가 설정되지 않아 자동 인라인 리뷰를 생략했습니다.", fallback=True)
+              raise SystemExit(0)
+
+          # 응답 포맷 안정성을 위해 JSON 반환을 강하게 요구
           prompt = f"""
           너는 GitHub Pull Request 코드 리뷰어다.
 
@@ -180,18 +237,15 @@ jobs:
           {diff}
           """
 
-          # 우선 요청 모델(5.3-mini)을 시도하고, 미지원이면 gpt-5-mini로 폴백
-          preferred_model = "gpt-5.3-mini"
-          fallback_model = "gpt-5-mini"
-          models_to_try = [preferred_model]
-          if preferred_model != fallback_model:
-              models_to_try.append(fallback_model)
-
+          # gpt-5.3-mini를 우선 시도하고, 실패 시 gpt-5-mini로 폴백
+          models_to_try = ["gpt-5.3-mini", "gpt-5-mini"]
           result = None
+          model_used = None
           last_error = None
-          request_timeout_sec = 60
+          request_timeout_sec = 90
           max_retries = 3
           retry_backoff_sec = 2
+
           for model_name in models_to_try:
               for attempt in range(1, max_retries + 1):
                   body = {
@@ -204,7 +258,7 @@ jobs:
                       data=json.dumps(body).encode("utf-8"),
                       headers={
                           "Content-Type": "application/json",
-                          "Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}",
+                          "Authorization": f"Bearer {api_key}",
                       },
                       method="POST",
                   )
@@ -212,38 +266,50 @@ jobs:
                   try:
                       with urlopen(req, timeout=request_timeout_sec) as res:
                           result = json.loads(res.read().decode("utf-8"))
+                      model_used = model_name
                       print(f"OpenAI model used: {model_name} (attempt {attempt})")
                       break
-                  except (HTTPError, URLError, TimeoutError, OSError, ValueError) as e:
-                      last_error = e
-                      if attempt < max_retries:
-                          sleep_sec = retry_backoff_sec ** (attempt - 1)
+                  except HTTPError as e:
+                      error_detail = ""
+                      try:
+                          error_detail = e.read().decode("utf-8", errors="ignore")
+                      except Exception:
+                          pass
+                      last_error = f"{e} {error_detail}".strip()
+
+                      # 400은 입력/모델 호환 이슈일 가능성이 높아
+                      # 같은 모델 재시도 대신 즉시 다음 모델로 폴백
+                      if e.code == 400:
+                          add_warning(f"OpenAI model={model_name} HTTP 400 발생. 다음 모델로 폴백합니다.")
                           print(
-                              f"OpenAI call failed for model={model_name}, attempt={attempt}: {e}. "
-                              f"Retry in {sleep_sec}s."
+                              f"OpenAI call failed for model={model_name}, attempt={attempt}: {last_error}. "
+                              "Skip retries for this model."
                           )
-                          time.sleep(sleep_sec)
-                      else:
-                          print(f"OpenAI call failed for model={model_name} after {attempt} attempts: {e}")
+                          break
+                  except (URLError, TimeoutError, OSError, ValueError) as e:
+                      last_error = str(e)
+
+                  if attempt < max_retries:
+                      sleep_sec = retry_backoff_sec ** (attempt - 1)
+                      print(
+                          f"OpenAI call failed for model={model_name}, attempt={attempt}: {last_error}. "
+                          f"Retry in {sleep_sec}s."
+                      )
+                      time.sleep(sleep_sec)
+                  else:
+                      print(
+                          f"OpenAI call failed for model={model_name} after {attempt} attempts: {last_error}"
+                      )
+
               if result is not None:
                   break
 
           if result is None:
-              fallback = {
-                  "summary": (
-                      "OpenAI 호출에 실패해 자동 인라인 리뷰를 생략했습니다. "
-                      "잠시 후 다시 실행해 주세요."
-                  ),
-                  "comments": []
-              }
+              summary = "OpenAI 응답을 받지 못해 자동 인라인 리뷰를 생략했습니다. 잠시 후 다시 실행해 주세요."
               if last_error:
-                  fallback["summary"] += f" (원인: {last_error})"
-
-              Path("review_result.json").write_text(
-                  json.dumps(fallback, ensure_ascii=False, indent=2)
-              )
-              print("===== REVIEW RESULT JSON (FALLBACK) =====")
-              print(json.dumps(fallback, ensure_ascii=False, indent=2))
+                  summary += f" (원인: {last_error})"
+              add_warning(f"OpenAI 호출 실패: {last_error}")
+              write_review(summary, fallback=True, model_used=model_used)
               raise SystemExit(0)
 
           text_parts = []
@@ -253,11 +319,14 @@ jobs:
                       text_parts.append(content.get("text", ""))
 
           raw_text = "\n".join(text_parts).strip()
+          if not raw_text:
+              raw_text = str(result.get("output_text", "")).strip()
 
-          # JSON 파싱 실패 대비
+          # 모델 출력이 비정형일 수 있어 파싱 실패를 안전하게 처리
           try:
               parsed = json.loads(raw_text)
           except Exception:
+              add_warning("OpenAI 응답 JSON 파싱 실패로 인라인 리뷰를 생략했습니다.")
               parsed = {
                   "summary": "AI 응답을 구조화하지 못해 인라인 리뷰를 생략했습니다.",
                   "comments": []
@@ -272,33 +341,48 @@ jobs:
           # 최대 5개로 제한
           parsed["comments"] = parsed["comments"][:5]
 
-          Path("review_result.json").write_text(
-              json.dumps(parsed, ensure_ascii=False, indent=2)
-          )
-
-          print("===== REVIEW RESULT JSON =====")
-          print(json.dumps(parsed, ensure_ascii=False, indent=2))
+          write_review(parsed["summary"], parsed["comments"], model_used=model_used)
           PY
 
-      - name: Create review summary and inline comments
-        uses: actions/github-script@v7
+      - name: Create inline comments (reply enabled)
+        continue-on-error: true
+        uses: actions/github-script@v8
+        env:
+          REVIEW_BOT_LOGIN: ${{ env.REVIEW_BOT_LOGIN }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
-            const review = JSON.parse(fs.readFileSync('review_result.json', 'utf8'));
+
+            let review = {
+              summary: '리뷰 결과 파일이 없어 인라인 리뷰를 생략했습니다.',
+              comments: [],
+              meta: { status: 'fallback', warnings: ['review_result.json missing'] }
+            };
+
+            try {
+              if (fs.existsSync('review_result.json')) {
+                const parsed = JSON.parse(fs.readFileSync('review_result.json', 'utf8'));
+                if (parsed && typeof parsed === 'object') {
+                  review = parsed;
+                }
+              }
+            } catch (e) {
+              console.log('review_result.json parse failed');
+              console.log(e);
+            }
 
             const pr = context.payload.pull_request;
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const pull_number = pr.number;
             const commit_id = pr.head.sha;
+            const botLogin = process.env.REVIEW_BOT_LOGIN || 'github-actions[bot]';
 
-            // ---------------------------
-            // 수정 포인트 6
-            // summary는 리뷰 본문
-            // comments는 인라인 코멘트 목록
-            // ---------------------------
+            // review_result.json 표준 스키마:
+            // - summary: 텍스트 요약
+            // - comments: 인라인 코멘트 후보
+            // - meta: 상태/모델/경고
             const rawComments = Array.isArray(review.comments) ? review.comments : [];
 
             const severityMeta = {
@@ -346,11 +430,101 @@ jobs:
               }))
               .slice(0, 5);
 
+            const resolveLine = (reviewComment) => Number(reviewComment.line ?? reviewComment.original_line ?? -1);
+            const descByCreatedAt = (a, b) => new Date(b.created_at) - new Date(a.created_at);
+            const now = Date.now();
+            // 너무 오래된 스레드는 재사용하지 않음
+            const replyWindowMs = 1000 * 60 * 60 * 24 * 14;
+
+            let existingReviewComments = [];
+            try {
+              existingReviewComments = await github.paginate(github.rest.pulls.listReviewComments, {
+                owner,
+                repo,
+                pull_number,
+                per_page: 100
+              });
+            } catch (e) {
+              console.log('Failed to list existing review comments');
+              console.log(e);
+            }
+
+            const isReplyTarget = (rc, path, line) => {
+              if (rc.path !== path || resolveLine(rc) !== line) return false;
+              if (rc.in_reply_to_id) return false;
+              if (!rc.user || rc.user.login !== botLogin) return false;
+
+              // outdated comment(position=null)는 새 인라인으로 분기
+              if (Object.prototype.hasOwnProperty.call(rc, 'position') && rc.position === null) {
+                return false;
+              }
+
+              // 오래된 스레드는 재활용하지 않음
+              const createdAt = new Date(rc.created_at).getTime();
+              if (Number.isFinite(createdAt) && now - createdAt > replyWindowMs) {
+                return false;
+              }
+
+              // 가능하면 현재 head commit에 연결된 코멘트만 스레드 재사용
+              const hasCommitInfo = Boolean(rc.commit_id || rc.original_commit_id);
+              if (hasCommitInfo && rc.commit_id !== commit_id && rc.original_commit_id !== commit_id) {
+                return false;
+              }
+
+              return true;
+            };
+
+            const findReplyTarget = (path, line) => {
+              return existingReviewComments
+                .filter(rc => isReplyTarget(rc, path, line))
+                .sort(descByCreatedAt)[0];
+            };
+
+            const hasSameReply = (parentId, body) => {
+              const normalizedBody = String(body || '').trim();
+              return existingReviewComments.some(rc => (
+                rc.in_reply_to_id === parentId &&
+                rc.user &&
+                rc.user.login === botLogin &&
+                String(rc.body || '').trim() === normalizedBody
+              ));
+            };
+
             let created = 0;
+            let replied = 0;
+            let skipped = 0;
             let failed = 0;
             for (const c of comments) {
+              const target = findReplyTarget(c.path, c.line);
+              if (target) {
+                if (hasSameReply(target.id, c.body)) {
+                  // 완전 동일 답글은 중복 생성하지 않음
+                  skipped += 1;
+                  continue;
+                }
+
+                try {
+                  const replyRes = await github.rest.pulls.createReplyForReviewComment({
+                    owner,
+                    repo,
+                    pull_number,
+                    comment_id: target.id,
+                    body: c.body
+                  });
+                  replied += 1;
+                  if (replyRes && replyRes.data) {
+                    existingReviewComments.push(replyRes.data);
+                  }
+                  continue;
+                } catch (e) {
+                  // 리플 실패 시에도 리뷰는 계속 진행(새 인라인으로 폴백)
+                  console.log(`Reply failed for thread ${target.id} (${c.path}:${c.line}), fallback to new inline comment`);
+                  console.log(e);
+                }
+              }
+
               try {
-                await github.rest.pulls.createReviewComment({
+                const createRes = await github.rest.pulls.createReviewComment({
                   owner,
                   repo,
                   pull_number,
@@ -361,25 +535,358 @@ jobs:
                   body: c.body
                 });
                 created += 1;
+                if (createRes && createRes.data) {
+                  existingReviewComments.push(createRes.data);
+                }
               } catch (e) {
                 failed += 1;
+                console.log(`::warning::Inline comment create failed for ${c.path}:${c.line}`);
                 console.log(`Inline comment failed: ${c.path}:${c.line}`);
                 console.log(e);
               }
             }
 
-            const summaryLines = [
-              '## AI 리뷰 요약',
-              '',
-              String(review.summary || '요약 없음'),
-              '',
-              `- 인라인 코멘트 성공: ${created}건`,
-              `- 인라인 코멘트 실패: ${failed}건`
-            ];
+            const status = String((review.meta && review.meta.status) || 'ok');
+            const modelUsed = String((review.meta && review.meta.model_used) || 'unknown');
+            const reviewWarnings = Array.isArray(review.meta && review.meta.warnings) ? review.meta.warnings : [];
 
-            await github.rest.issues.createComment({
-              owner,
-              repo,
-              issue_number: pull_number,
-              body: summaryLines.join('\n')
-            });
+            if (status === 'fallback') {
+              console.log('::warning::AI review step ended in fallback mode.');
+            }
+            if (failed > 0) {
+              console.log(`::warning::Inline comment failure count=${failed}`);
+            }
+
+            console.log(`AI summary: ${String(review.summary || '요약 없음')}`);
+            console.log(`Inline comments created=${created}, replied=${replied}, skipped=${skipped}, failed=${failed}`);
+            console.log(`AI review status=${status}, model=${modelUsed}`);
+            if (reviewWarnings.length > 0) {
+              console.log(`AI review warnings=${reviewWarnings.join(' | ')}`);
+            }
+
+            // PR 요약 코멘트는 남기지 않고, Actions Summary로만 가시성 제공
+            if (process.env.GITHUB_STEP_SUMMARY) {
+              const lines = [
+                '### AI Review Bot',
+                `- status: ${status}`,
+                `- model: ${modelUsed}`,
+                `- inline created: ${created}`,
+                `- inline replied: ${replied}`,
+                `- inline skipped: ${skipped}`,
+                `- inline failed: ${failed}`
+              ];
+              if (reviewWarnings.length > 0) {
+                lines.push(`- warnings: ${reviewWarnings.join(' | ')}`);
+              }
+              fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
+            }
+
+  reply_to_thread:
+    # 사용자가 리뷰봇 인라인 코멘트 스레드에 단 리플에만 응답
+    if: github.event_name == 'pull_request_review_comment' && github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository && github.event.comment.user.login != env.REVIEW_BOT_LOGIN && github.event.comment.in_reply_to_id
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Reply to review thread with OpenAI
+        continue-on-error: true
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BOT_LOGIN: ${{ env.REVIEW_BOT_LOGIN }}
+          MAX_PARENT_BODY_CHARS: ${{ env.REVIEW_BOT_MAX_PARENT_BODY_CHARS }}
+          MAX_USER_BODY_CHARS: ${{ env.REVIEW_BOT_MAX_USER_BODY_CHARS }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.event.repository.name }}
+          PULL_NUMBER: ${{ github.event.pull_request.number }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          PARENT_COMMENT_ID: ${{ github.event.comment.in_reply_to_id }}
+          USER_LOGIN: ${{ github.event.comment.user.login }}
+          USER_BODY: ${{ github.event.comment.body }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import time
+          from urllib.error import HTTPError, URLError
+          from urllib.parse import quote
+          from urllib.request import Request, urlopen
+
+          owner = os.getenv("OWNER", "")
+          repo = os.getenv("REPO", "")
+          pull_number = os.getenv("PULL_NUMBER", "")
+          comment_id = os.getenv("COMMENT_ID", "")
+          parent_comment_id = os.getenv("PARENT_COMMENT_ID", "")
+          user_login = os.getenv("USER_LOGIN", "reviewer")
+          user_body = os.getenv("USER_BODY", "").strip()
+          gh_token = os.getenv("GH_TOKEN", "")
+          openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
+          bot_login = os.getenv("BOT_LOGIN", "github-actions[bot]")
+          max_parent_body_chars = int(os.getenv("MAX_PARENT_BODY_CHARS", "4000"))
+          max_user_body_chars = int(os.getenv("MAX_USER_BODY_CHARS", "4000"))
+          step_summary_path = os.getenv("GITHUB_STEP_SUMMARY", "")
+
+          def warn(message):
+              normalized = " ".join(str(message).split())
+              print(f"::warning::{normalized}")
+
+          def gh_request(url, method="GET", body=None):
+              req = Request(
+                  url,
+                  method=method,
+                  headers={
+                      "Accept": "application/vnd.github+json",
+                      "Authorization": f"Bearer {gh_token}",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              if body is not None:
+                  raw = json.dumps(body).encode("utf-8")
+                  req.data = raw
+                  req.add_header("Content-Type", "application/json")
+
+              with urlopen(req, timeout=30) as res:
+                  return json.loads(res.read().decode("utf-8"))
+
+          def gh_paginated(url):
+              # review comment는 페이지네이션 필수 (긴 PR 중복응답 방지)
+              items = []
+              page = 1
+              while True:
+                  separator = "&" if "?" in url else "?"
+                  page_url = f"{url}{separator}per_page=100&page={page}"
+                  data = gh_request(page_url)
+                  if not isinstance(data, list) or not data:
+                      break
+                  items.extend(data)
+                  if len(data) < 100:
+                      break
+                  page += 1
+                  if page > 20:
+                      break
+              return items
+
+          def clip_text(text, max_chars):
+              # 과도한 본문 길이로 인한 비용/지연 방지
+              value = str(text or "").strip()
+              if len(value) <= max_chars:
+                  return value
+              return value[:max_chars]
+
+          def append_summary(lines):
+              if not step_summary_path:
+                  return
+              try:
+                  with open(step_summary_path, "a", encoding="utf-8") as fp:
+                      fp.write("\n".join(lines) + "\n")
+              except Exception:
+                  pass
+
+          if not gh_token:
+              warn("GH_TOKEN missing; skip thread reply")
+              append_summary([
+                  "### AI Review Thread Reply",
+                  "- status: skipped",
+                  "- reason: GH_TOKEN missing",
+              ])
+              raise SystemExit(0)
+
+          if not (owner and repo and pull_number and comment_id and parent_comment_id):
+              warn("Required GitHub event fields are missing; skip thread reply")
+              append_summary([
+                  "### AI Review Thread Reply",
+                  "- status: skipped",
+                  "- reason: missing event fields",
+              ])
+              raise SystemExit(0)
+
+          # parent가 봇 코멘트가 아닐 경우 응답하지 않음
+          parent_url = f"https://api.github.com/repos/{quote(owner)}/{quote(repo)}/pulls/comments/{quote(parent_comment_id)}"
+          try:
+              parent = gh_request(parent_url)
+          except Exception as e:
+              warn(f"Failed to fetch parent comment: {e}")
+              raise SystemExit(0)
+
+          parent_login = ((parent.get("user") or {}).get("login") or "").strip()
+          if parent_login != bot_login:
+              print(f"Parent comment author is not {bot_login}: {parent_login}")
+              append_summary([
+                  "### AI Review Thread Reply",
+                  "- status: skipped",
+                  f"- reason: parent author is {parent_login}",
+              ])
+              raise SystemExit(0)
+
+          # 같은 사용자 리플에 대해 봇이 이미 답글을 단 경우 중복 응답 방지
+          try:
+              all_comments = gh_paginated(
+                  f"https://api.github.com/repos/{quote(owner)}/{quote(repo)}/pulls/{quote(pull_number)}/comments"
+              )
+          except Exception as e:
+              all_comments = []
+              warn(f"Failed to list review comments: {e}")
+
+          already_replied = False
+          if isinstance(all_comments, list):
+              for c in all_comments:
+                  author = ((c.get("user") or {}).get("login") or "").strip()
+                  in_reply_to_id = c.get("in_reply_to_id")
+                  if author == bot_login and str(in_reply_to_id) == str(comment_id):
+                      already_replied = True
+                      break
+
+          if already_replied:
+              print("Bot already replied to this user comment; skip")
+              append_summary([
+                  "### AI Review Thread Reply",
+                  "- status: skipped",
+                  "- reason: already replied to this user comment",
+              ])
+              raise SystemExit(0)
+
+          # OpenAI로 스레드 답글 생성
+          response_text = ""
+          if not openai_api_key:
+              warn("OPENAI_API_KEY missing in reply_to_thread; use fallback reply message")
+              response_text = (
+                  f"@{user_login} 코멘트 확인했습니다. "
+                  "현재 자동 응답 설정 문제로 상세 답변 생성에 실패했습니다. "
+                  "다음 커밋 반영 시 함께 재검토하겠습니다."
+              )
+          else:
+              parent_body = clip_text(parent.get("body"), max_parent_body_chars)
+              path = parent.get("path") or ""
+              line = parent.get("line") or parent.get("original_line") or ""
+              user_body_prompt = clip_text(user_body, max_user_body_chars)
+
+              prompt = f"""
+              너는 GitHub PR 코드리뷰 스레드에서 답글을 다는 어시스턴트다.
+              아래 정보를 바탕으로 사용자 질문/의견에 한국어로 답하라.
+              답변은 최대 4문장, 불필요한 반복 금지, 코드리뷰 문맥에만 집중.
+              확실하지 않으면 단정하지 말고 필요한 확인사항을 짧게 요청하라.
+              마크다운 코드블록은 사용하지 마라.
+
+              파일: {path}
+              라인: {line}
+
+              기존 봇 코멘트:
+              {parent_body}
+
+              사용자({user_login}) 리플:
+              {user_body_prompt}
+              """
+
+              models_to_try = ["gpt-5.3-mini", "gpt-5-mini"]
+              request_timeout_sec = 90
+              max_retries = 3
+              retry_backoff_sec = 2
+              result = None
+              last_error = None
+
+              for model_name in models_to_try:
+                  for attempt in range(1, max_retries + 1):
+                      body = {"model": model_name, "input": prompt}
+                      req = Request(
+                          "https://api.openai.com/v1/responses",
+                          data=json.dumps(body).encode("utf-8"),
+                          headers={
+                              "Content-Type": "application/json",
+                              "Authorization": f"Bearer {openai_api_key}",
+                          },
+                          method="POST",
+                      )
+                      try:
+                          with urlopen(req, timeout=request_timeout_sec) as res:
+                              result = json.loads(res.read().decode("utf-8"))
+                          print(f"Reply model used: {model_name} (attempt {attempt})")
+                          break
+                      except HTTPError as e:
+                          detail = ""
+                          try:
+                              detail = e.read().decode("utf-8", errors="ignore")
+                          except Exception:
+                              pass
+                          last_error = f"{e} {detail}".strip()
+                          if e.code == 400:
+                              warn(f"Reply model={model_name} HTTP 400, fallback to next model")
+                              print(f"Reply model={model_name} HTTP 400, skip retries for this model")
+                              break
+                      except (URLError, TimeoutError, OSError, ValueError) as e:
+                          last_error = str(e)
+
+                      if attempt < max_retries:
+                          sleep_sec = retry_backoff_sec ** (attempt - 1)
+                          print(f"Reply generation failed model={model_name} attempt={attempt}: {last_error}. Retry in {sleep_sec}s")
+                          time.sleep(sleep_sec)
+                      else:
+                          print(f"Reply generation failed model={model_name} after {attempt} attempts: {last_error}")
+
+                  if result is not None:
+                      break
+
+              if result is None:
+                  warn(f"Reply generation failed for all models: {last_error}")
+                  response_text = (
+                      f"@{user_login} 코멘트 확인했습니다. "
+                      "지금은 자동 답변 생성이 일시적으로 실패해 상세 답변을 남기지 못했습니다. "
+                      "다음 실행에서 다시 시도하겠습니다."
+                  )
+              else:
+                  parts = []
+                  for item in result.get("output", []):
+                      for content in item.get("content", []):
+                          if content.get("type") == "output_text":
+                              parts.append(content.get("text", ""))
+
+                  response_text = "\n".join(parts).strip()
+                  if not response_text:
+                      response_text = str(result.get("output_text", "")).strip()
+                  if not response_text:
+                      response_text = (
+                          f"@{user_login} 의견 감사합니다. "
+                          "리뷰 내용을 반영해 다시 확인하겠습니다."
+                      )
+
+          # 댓글 글자수 안전장치 (GitHub body 최대치 근접 보호)
+          response_text = response_text.strip()
+          if len(response_text) > 60000:
+              response_text = response_text[:60000]
+
+          # 사용자 리플(comment_id)에 답글 시도 -> 실패 시 부모 코멘트(parent_comment_id)에 폴백
+          target_ids = [comment_id, parent_comment_id]
+          posted = False
+          last_post_error = None
+          for target_id in target_ids:
+              post_url = (
+                  f"https://api.github.com/repos/{quote(owner)}/{quote(repo)}/pulls/"
+                  f"{quote(pull_number)}/comments/{quote(str(target_id))}/replies"
+              )
+              try:
+                  gh_request(post_url, method="POST", body={"body": response_text})
+                  posted = True
+                  print(f"Reply posted to comment_id={target_id}")
+                  break
+              except Exception as e:
+                  last_post_error = e
+                  print(f"Reply post failed for comment_id={target_id}: {e}")
+
+          if not posted:
+              warn(f"Failed to post thread reply: {last_post_error}")
+              print(f"Failed to post reply after fallback: {last_post_error}")
+              append_summary([
+                  "### AI Review Thread Reply",
+                  "- status: failed",
+                  f"- parent_comment_id: {parent_comment_id}",
+                  f"- user_comment_id: {comment_id}",
+              ])
+          else:
+              append_summary([
+                  "### AI Review Thread Reply",
+                  "- status: replied",
+                  f"- parent_comment_id: {parent_comment_id}",
+                  f"- user_comment_id: {comment_id}",
+              ])
+
+          raise SystemExit(0)
+          PY
