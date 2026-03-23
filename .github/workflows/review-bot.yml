@@ -84,6 +84,10 @@ jobs:
               "yarn.lock",
               "bun.lockb",
           }
+          excluded_exact_paths = {
+              # 리뷰봇이 자기 설정 파일을 계속 재리뷰하며 루프를 만드는 문제 방지
+              ".github/workflows/review-bot.yml",
+          }
           excluded_dir_names = {
               ".next",
               "dist",
@@ -142,6 +146,10 @@ jobs:
                   return False
 
               posix_path = PurePosixPath(normalized)
+              normalized_path = posix_path.as_posix()
+              if normalized_path in excluded_exact_paths:
+                  return True
+
               file_name = posix_path.name
               if file_name in excluded_file_names:
                   return True
@@ -593,6 +601,11 @@ jobs:
 
             const comments = rawComments
               .filter(c => c.path && Number.isFinite(Number(c.line)))
+              .filter(c => {
+                // 노이즈/무한 코멘트 방지를 위해 high 이상만 게시
+                const sev = normalizeSeverity(c.severity);
+                return sev === 'critical' || sev === 'high';
+              })
               .map(c => ({
                 path: c.path,
                 line: Number(c.line),
