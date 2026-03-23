@@ -222,7 +222,15 @@ public class MatchingQueueService {
         Deque<WaitingUser> queue = waitingQueues.get(queueKey);
 
         // 맵에는 있는데 실제 큐가 없으면 비정상 상태지만, 조회는 안전하게 false 처리
+        // 불일치 발견: userQueueMap에는 있으나 실제 대기열(waitingQueues)에는 없음
         if (queue == null) {
+            // 원자적으로 제거 (내가 확인했던 그 queueKey일 때만 제거하여 동시성 이슈 방지)
+            userQueueMap.remove(userId, queueKey);
+
+            // 로그를 남겨 추적 가능하게 함
+            // log.warn("Inconsistency detected: User {} was in userQueueMap but queue {} was missing. Cleaned up.",
+            // userId, queueKey);
+
             return new QueueStateResponse(false, null, null, 0);
         }
 
