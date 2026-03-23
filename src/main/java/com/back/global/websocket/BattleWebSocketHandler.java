@@ -1,0 +1,38 @@
+package com.back.global.websocket;
+
+import java.util.Map;
+
+import org.springframework.messaging.handler.annotation.DestinationVariable;
+import org.springframework.messaging.handler.annotation.MessageMapping;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.stereotype.Controller;
+
+import com.back.global.websocket.dto.CodeUpdateMessage;
+
+import lombok.RequiredArgsConstructor;
+
+@Controller
+@RequiredArgsConstructor
+public class BattleWebSocketHandler {
+
+    private final SimpMessagingTemplate messagingTemplate;
+
+    /**
+     * 참여자가 코드 변경 시 호출
+     * STOMP SEND /app/room/{roomId}/code
+     * Body: { "userId": 1, "code": "..." }
+     *
+     * 관전자 채널로만 브로드캐스트 (참여자끼리는 서로 코드 못 봄)
+     * TODO: Security 연동 후 userId를 Principal에서 추출하도록 변경
+     */
+    @MessageMapping("/room/{roomId}/code")
+    public void handleCodeUpdate(@DestinationVariable Long roomId, CodeUpdateMessage message) {
+
+        messagingTemplate.convertAndSend(
+                "/topic/room/" + roomId + "/spectate",
+                Map.of(
+                        "type", "CODE_UPDATE",
+                        "userId", message.userId(),
+                        "code", message.code()));
+    }
+}

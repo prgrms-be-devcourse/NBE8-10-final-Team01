@@ -14,11 +14,13 @@ import com.back.domain.battle.battleparticipant.repository.BattleParticipantRepo
 import com.back.domain.battle.battleroom.entity.BattleRoom;
 import com.back.domain.battle.battleroom.entity.BattleRoomStatus;
 import com.back.domain.battle.battleroom.repository.BattleRoomRepository;
+import com.back.domain.battle.result.service.BattleResultService;
 import com.back.domain.member.member.entity.Member;
 import com.back.domain.member.member.repository.MemberRepository;
 import com.back.domain.problem.submission.dto.SubmissionResponse;
 import com.back.domain.problem.submission.dto.SubmitRequest;
 import com.back.domain.problem.submission.entity.Submission;
+import com.back.domain.problem.submission.entity.SubmissionResult;
 import com.back.domain.problem.submission.repository.SubmissionRepository;
 
 import lombok.RequiredArgsConstructor;
@@ -32,6 +34,7 @@ public class SubmissionService {
     private final MemberRepository memberRepository;
     private final SubmissionRepository submissionRepository;
     private final SimpMessagingTemplate messagingTemplate;
+    private final BattleResultService battleResultService;
 
     @Transactional
     public SubmissionResponse submit(SubmitRequest request) {
@@ -41,12 +44,10 @@ public class SubmissionService {
                 .findById(request.roomId())
                 .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 방입니다."));
 
-        // 1-1. PLAYING 상태 검증
         if (room.getStatus() != BattleRoomStatus.PLAYING) {
             throw new IllegalStateException("진행 중인 배틀이 아닙니다. 현재 상태: " + room.getStatus());
         }
 
-        // 1-2. 타이머 만료 검증
         if (room.isExpired()) {
             throw new IllegalStateException("배틀 시간이 종료되었습니다.");
         }
@@ -71,7 +72,7 @@ public class SubmissionService {
 
         // 5. 채점 실행 (Mock - 항상 AC 반환)
         // TODO: 실제 Judge API 연동으로 교체
-        String result = "AC";
+        SubmissionResult result = SubmissionResult.AC;
         int totalCount = room.getProblem().getTestCases().size();
         int passedCount = totalCount;
 
@@ -86,14 +87,19 @@ public class SubmissionService {
         messagingTemplate.convertAndSend(
                 "/topic/room/" + room.getId(),
                 Map.of(
-                        "type", "SUBMISSION",
-                        "userId", member.getId(),
-                        "result", result,
-                        "passedCount", passedCount,
-                        "totalCount", totalCount));
+                        "type",
+                        "SUBMISSION",
+                        "userId",
+                        member.getId(),
+                        "result",
+                        result.name(),
+                        "passedCount",
+                        passedCount,
+                        "totalCount",
+                        totalCount));
 
         // 8. AC이면 참여자 완료 처리
-        if ("AC".equals(result)) {
+        if (result == SubmissionResult.AC) {
             participant.complete(LocalDateTime.now());
 
             // TODO: 리팩토링 - 현재 참여자 수가 최대 4명으로 고정이라 성능 문제 없으나,
@@ -113,7 +119,7 @@ public class SubmissionService {
             boolean allFinished = allParticipants.stream().allMatch(p -> p.getStatus() == BattleParticipantStatus.EXIT);
 
             if (allFinished) {
-                // TODO: Step7 BattleResultService.settle(room.getId()) 호출
+                battleResultService.settle(room.getId());
             }
         }
 

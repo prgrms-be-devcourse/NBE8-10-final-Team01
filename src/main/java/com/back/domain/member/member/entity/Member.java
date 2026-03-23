@@ -31,4 +31,8 @@ public class Member extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private Role role;
+
+    public void applyScore(long delta) {
+        this.score = (this.score == null ? 0L : this.score) + delta;
+    }
 }
