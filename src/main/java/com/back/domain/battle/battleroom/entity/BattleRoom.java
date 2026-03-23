@@ -32,6 +32,7 @@ public class BattleRoom extends BaseEntity {
 
     private Integer maxPlayers;
     private LocalDateTime timerEnd;
+    private LocalDateTime startedAt;
 
     /**
      * 방은 waiting 상태로 먼저 생성된다. (아무도 입장 안한 상태)
@@ -49,7 +50,8 @@ public class BattleRoom extends BaseEntity {
 
     public void startBattle(Duration duration) {
         this.status = BattleRoomStatus.PLAYING;
-        this.timerEnd = LocalDateTime.now().plus(duration);
+        this.startedAt = LocalDateTime.now();
+        this.timerEnd = this.startedAt.plus(duration);
     }
 
     public void finish() {
