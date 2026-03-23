@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import java.util.NoSuchElementException;
 import java.util.Optional;
 
 import org.junit.jupiter.api.DisplayName;
@@ -15,6 +14,7 @@ import com.back.domain.problem.problem.dto.ProblemDetailResponse;
 import com.back.domain.problem.problem.entity.Problem;
 import com.back.domain.problem.problem.enums.DifficultyLevel;
 import com.back.domain.problem.problem.repository.ProblemRepository;
+import com.back.global.exception.ServiceException;
 
 class ProblemServiceTest {
 
@@ -59,7 +59,7 @@ class ProblemServiceTest {
 
         // when & then
         assertThatThrownBy(() -> problemService.getProblem(999L))
-                .isInstanceOf(NoSuchElementException.class)
-                .hasMessage("존재하지 않는 문제입니다.");
+                .isInstanceOf(ServiceException.class)
+                .hasMessage("404-1 : 존재하지 않는 문제입니다.");
     }
 }
