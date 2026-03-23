@@ -2,6 +2,7 @@ package com.back.domain.member.member.service;
 
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.validation.annotation.Validated;
 
 import com.back.domain.member.member.dto.JoinRequest;
 import com.back.domain.member.member.entity.Member;
@@ -12,7 +13,10 @@ import com.back.global.rsData.RsData;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
+import java.util.Locale;
+
 @Service
+@Validated
 @RequiredArgsConstructor
 public class MemberService {
     private final MemberRepository memberRepository;
@@ -22,11 +26,14 @@ public class MemberService {
 
         // 비밀번호 확인 일치 검증
         if (!req.password().equals(req.passwordConfirm())) {
-            throw new ServiceException("MEMBER_400", "비밀번호와 비밀번호 확인이 일치하지 않습니다");
+            throw new ServiceException("MEMBER_400-1", "비밀번호와 비밀번호 확인이 일치하지 않습니다");
         }
 
+        // 이메일 정규화 (입력값 보호)
+        String normalizedEmail = req.email().trim().toLowerCase(Locale.ROOT);
+
         // 이메일 중복 체크
-        if (memberRepository.existsByEmail(req.email())) {
+        if (memberRepository.existsByEmail(normalizedEmail)) {
             throw new ServiceException("MEMBER_409", "이미 존재하는 이메일입니다");
         }
 
@@ -34,7 +41,7 @@ public class MemberService {
         String encodedPassword = passwordEncoder.encode(req.password());
 
         // 회원 생성 (엔티티 팩토리 메서드 사용)
-        Member member = Member.createUser(req.name(), req.email(), encodedPassword);
+        Member member = Member.createUser(req.name(), normalizedEmail, encodedPassword);
 
         memberRepository.save(member);
 

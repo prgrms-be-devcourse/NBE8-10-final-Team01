@@ -5,8 +5,13 @@ import com.back.global.jpa.entity.BaseEntity;
 
 import jakarta.persistence.*;
 import lombok.AccessLevel;
+import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+
+import java.util.Locale;
+
+import org.springframework.util.Assert;
 
 @Entity
 @Table(name = "members")
@@ -36,14 +41,30 @@ public class Member extends BaseEntity {
     @Column(nullable = false)
     private Role role;
 
-    public Member(String nickname, String email, String encodedPassword) {
+    @Builder(access = AccessLevel.PRIVATE)
+    private Member(String nickname, String email, String password, Role role) {
+        // 서비스 레이어 외의 호출에 대비한 최소한의 방어적 검증 (NPE 방지)
+        Assert.hasText(nickname, "닉네임은 필수입니다.");
+        Assert.hasText(email, "이메일은 필수입니다.");
+        Assert.hasText(password, "비밀번호는 필수입니다.");
+
         this.nickname = nickname;
         this.email = email;
-        this.password = encodedPassword;
-        this.role = Role.USER;
+        this.password = password;
+        this.role = (role != null) ? role : Role.USER;
+        this.score = 0L; // 초기값 설정
     }
-
     public static Member createUser(String nickname, String email, String encodedPassword) {
-        return new Member(nickname, email, encodedPassword);
+        // 이메일 정규화 (앞뒤 공백 제거 및 소문자 변환)
+        String normalizedEmail = (email != null)
+                ? email.trim().toLowerCase(Locale.ROOT)
+                : null;
+
+        return Member.builder()
+                .nickname(nickname)
+                .email(normalizedEmail)
+                .password(encodedPassword)
+                .role(Role.USER)
+                .build();
     }
 }
