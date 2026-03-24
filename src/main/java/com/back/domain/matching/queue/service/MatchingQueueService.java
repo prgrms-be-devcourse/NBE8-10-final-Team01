@@ -165,7 +165,6 @@ public class MatchingQueueService {
     private CreateRoomResponse tryMatchAndCreateRoom(QueueKey queueKey, Deque<WaitingUser> queue) {
 
         List<WaitingUser> matchedUsers;
-        boolean shouldRemoveQueue = false; //  성공 후 정리 여부를 락 안에서 판단하기 위한 플래그 추가
 
         // 락 안에서는 4명 확인 + 4명 추출까지만 수행
         synchronized (queue) {
@@ -192,10 +191,6 @@ public class MatchingQueueService {
                 }
                 return null;
             }
-
-            // 현재 4명을 꺼낸 직후 큐가 비었는지 미리 기록
-            // 성공 후 같은 queue에 대해 map 정리할 때 사용
-            shouldRemoveQueue = queue.isEmpty();
         }
 
         // 4) 방 생성 API에 넘길 참가자 ID 목록 생성
@@ -215,11 +210,9 @@ public class MatchingQueueService {
             matchedUsers.forEach(user -> userQueueMap.remove(user.getUserId()));
 
             // 8) 이 큐가 비었으면 waitingQueues 맵에서 키 제거(메모리 정리)
-            if (shouldRemoveQueue) { // 락 밖 computeIfPresent 제거
-                synchronized (queue) { // 빈 큐 정리를 같은 queue 락 안에서 수행
-                    if (queue.isEmpty()) { // 그 사이 다시 들어온 유저가 없을 때만 제거
-                        waitingQueues.remove(queueKey, queue); // 내가 처리한 바로 그 queue일 때만 제거
-                    }
+            synchronized (queue) { //  성공 후 같은 queue 락 안에서 직접 확인 후 제거
+                if (queue.isEmpty()) { //  플래그 대신 현재 시점의 실제 상태 확인
+                    waitingQueues.remove(queueKey, queue); // 내가 처리한 바로 그 queue일 때만 제거
                 }
             }
 
