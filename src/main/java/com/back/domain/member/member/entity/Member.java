@@ -59,6 +59,17 @@ public class Member extends BaseEntity {
         this.score = (this.score == null ? 0L : this.score) + delta;
     }
 
+    // Rq.getActor() 전용 — DB 조회 없이 토큰 데이터로 경량 Member 생성
+    // password, role 등 민감 정보 없이 id/email/nickname만 담은 객체 반환
+    public static Member of(Long id, String email, String nickname) {
+        // 같은 클래스이므로 protected 기본 생성자 접근 가능
+        Member member = new Member();
+        member.id = id;
+        member.email = email;
+        member.nickname = nickname;
+        return member;
+    }
+
     public static Member createUser(String nickname, String email, String encodedPassword) {
         // 이메일 정규화 (앞뒤 공백 제거 및 소문자 변환)
         String normalizedEmail = (email != null) ? email.trim().toLowerCase(Locale.ROOT) : null;

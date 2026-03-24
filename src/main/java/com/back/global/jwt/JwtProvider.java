@@ -14,8 +14,6 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import jakarta.annotation.PostConstruct;
 
-import com.nimbusds.jose.crypto.impl.HMAC;
-
 @Component
 public class JwtProvider {
 
@@ -27,18 +25,19 @@ public class JwtProvider {
 
     private SecretKey key;
 
-    //의존성 주입 완료 후, JWT 서명에 사용할 HMAC-SHA 키를 생성
+    // 의존성 주입 완료 후, JWT 서명에 사용할 HMAC-SHA 키를 생성
     @PostConstruct
     public void init() {
         this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
     }
 
     // 토큰 생성
-    public String createToken(Long memberId, String email, String role) {
+    public String createToken(Long memberId, String email, String nickname, String role) {
         Date now = new Date();
         return Jwts.builder()
                 .subject(String.valueOf(memberId))
                 .claim("email", email)
+                .claim("nickname", nickname)
                 .claim("role", role)
                 .issuedAt(now)
                 .expiration(new Date(now.getTime() + expiration))

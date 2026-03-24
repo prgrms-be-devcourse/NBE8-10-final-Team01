@@ -39,9 +39,7 @@ class MemberControllerTest {
     @BeforeEach
     void setUp() {
         // 로그인 테스트용 회원 사전 등록
-        memberRepository
-                .findByEmail(LOGIN_TEST_EMAIL)
-                .ifPresent(memberRepository::delete);
+        memberRepository.findByEmail(LOGIN_TEST_EMAIL).ifPresent(memberRepository::delete);
         Member member = Member.createUser("로그인테스터", LOGIN_TEST_EMAIL, passwordEncoder.encode(LOGIN_TEST_PASSWORD));
         memberRepository.save(member);
     }
@@ -49,6 +47,8 @@ class MemberControllerTest {
     @AfterEach
     void tearDown() {
         memberRepository.findByEmail(LOGIN_TEST_EMAIL).ifPresent(memberRepository::delete);
+        // join_success 테스트가 생성한 회원 정리 — 미삭제 시 재실행 때 중복 이메일로 실패
+        memberRepository.findByEmail("test@example.com").ifPresent(memberRepository::delete);
     }
 
     // ============ 회원가입 ============

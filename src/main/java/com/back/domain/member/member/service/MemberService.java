@@ -79,7 +79,11 @@ public class MemberService {
         }
 
         // JWT 토큰 발급
-        String accessToken = jwtProvider.createToken(member.getId(), member.getEmail(), member.getRole().getKey());
+        String accessToken = jwtProvider.createToken(
+                member.getId(),
+                member.getEmail(),
+                member.getNickname(),
+                member.getRole().getKey());
 
         return RsData.of("200", "로그인 성공", new LoginResponse(accessToken));
     }
