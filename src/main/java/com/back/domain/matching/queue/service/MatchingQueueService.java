@@ -86,7 +86,7 @@ public class MatchingQueueService {
                     "매칭 대기열에 참가했습니다.",
                     queueKey.category(),
                     queueKey.difficulty().name(),
-                    currentSize // [변경] queue.size() 대신 락 안에서 구한 currentSize 사용
+                    currentSize // \ queue.size() 대신 락 안에서 구한 currentSize 사용
                     );
         }
 
@@ -98,21 +98,21 @@ public class MatchingQueueService {
                     "매칭 성사 및 방 생성 완료 (roomId=" + room.roomId() + ")",
                     queueKey.category(),
                     queueKey.difficulty().name(),
-                    0 // [변경] 매칭 성공이면 이 유저는 더 이상 대기열에 없으므로 0으로 명확화
+                    0 //  매칭 성공이면 이 유저는 더 이상 대기열에 없으므로 0으로 명확화
                     );
         }
 
         // 아직 인원 부족이면 대기 상태 응답
-        int remainingSize; // [변경] 응답 직전 다시 읽을 값은 락으로 보호해서 조회
-        synchronized (queue) { // [변경]
-            remainingSize = queue.size(); // [변경]
+        int remainingSize; //  응답 직전 다시 읽을 값은 락으로 보호해서 조회
+        synchronized (queue) {
+            remainingSize = queue.size();
         }
 
         return new QueueStatusResponse(
                 "매칭 대기열에 참가했습니다.",
                 queueKey.category(),
                 queueKey.difficulty().name(),
-                remainingSize // [변경] 락 밖 queue.size() 직접 호출 제거
+                remainingSize // 락 밖 queue.size() 직접 호출 제거
                 );
     }
 
@@ -151,8 +151,8 @@ public class MatchingQueueService {
             currentSize = queue.size();
 
             // 8. 해당 큐가 비어 있으면 삭제하고, 안 비어 있으면 그대로 둬라
-            if (currentSize == 0) { // [변경] 빈 큐 정리를 락 안으로 이동
-                waitingQueues.remove(queueKey, queue); // [변경] 내가 잡고 있는 바로 그 queue일 때만 제거
+            if (currentSize == 0) { //  빈 큐 정리를 락 안으로 이동
+                waitingQueues.remove(queueKey, queue); //  내가 잡고 있는 바로 그 queue일 때만 제거
             }
         }
 
@@ -165,6 +165,7 @@ public class MatchingQueueService {
     private CreateRoomResponse tryMatchAndCreateRoom(QueueKey queueKey, Deque<WaitingUser> queue) {
 
         List<WaitingUser> matchedUsers;
+        boolean shouldRemoveQueue = false; //  성공 후 정리 여부를 락 안에서 판단하기 위한 플래그 추가
 
         // 락 안에서는 4명 확인 + 4명 추출까지만 수행
         synchronized (queue) {
@@ -191,6 +192,10 @@ public class MatchingQueueService {
                 }
                 return null;
             }
+
+            // 현재 4명을 꺼낸 직후 큐가 비었는지 미리 기록
+            // 성공 후 같은 queue에 대해 map 정리할 때 사용
+            shouldRemoveQueue = queue.isEmpty();
         }
 
         // 4) 방 생성 API에 넘길 참가자 ID 목록 생성
@@ -210,7 +215,13 @@ public class MatchingQueueService {
             matchedUsers.forEach(user -> userQueueMap.remove(user.getUserId()));
 
             // 8) 이 큐가 비었으면 waitingQueues 맵에서 키 제거(메모리 정리)
-            waitingQueues.computeIfPresent(queueKey, (k, q) -> q.isEmpty() ? null : q);
+            if (shouldRemoveQueue) { // 락 밖 computeIfPresent 제거
+                synchronized (queue) { // 빈 큐 정리를 같은 queue 락 안에서 수행
+                    if (queue.isEmpty()) { // 그 사이 다시 들어온 유저가 없을 때만 제거
+                        waitingQueues.remove(queueKey, queue); // 내가 처리한 바로 그 queue일 때만 제거
+                    }
+                }
+            }
 
             return response;
         } catch (RuntimeException e) {
