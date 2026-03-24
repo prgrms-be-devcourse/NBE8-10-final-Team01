@@ -7,8 +7,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.validation.annotation.Validated;
 
 import com.back.domain.member.member.dto.JoinRequest;
-import com.back.domain.member.member.dto.MyInfoResponse;
 import com.back.domain.member.member.dto.LoginRequest;
+import com.back.domain.member.member.dto.MyInfoResponse;
 import com.back.domain.member.member.entity.Member;
 import com.back.domain.member.member.repository.MemberRepository;
 import com.back.global.exception.ServiceException;
@@ -68,7 +68,7 @@ public class MemberService {
 
         return RsData.of("200", "내 정보 조회 성공", MyInfoResponse.from(member));
     }
-  
+
     // 로그인 — 인증 성공 시 accessToken 문자열 반환 (쿠키 설정은 컨트롤러가 담당)
     public String login(@Valid LoginRequest req) {
 

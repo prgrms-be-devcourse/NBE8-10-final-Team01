@@ -1,7 +1,7 @@
 package com.back.domain.member.member.controller;
 
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.hamcrest.Matchers.containsString;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -21,9 +21,6 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
-
-import com.back.domain.member.member.entity.Member;
-import com.back.domain.member.member.repository.MemberRepository;
 
 import com.back.domain.member.member.entity.Member;
 import com.back.domain.member.member.repository.MemberRepository;
@@ -87,17 +84,32 @@ class MemberControllerTest {
     @Test
     @DisplayName("내정보 조회 요청 시 회원 정보를 반환한다")
     void getMyInfo_success() throws Exception {
-        // given
-        Member member = memberRepository.save(Member.createUser("내정보유저", "me-test@example.com", "encoded-password"));
+        // given - 로그인해서 accessToken 쿠키 확보
+        Member member = memberRepository.findByEmail(LOGIN_TEST_EMAIL).orElseThrow();
+
+        String loginBody = """
+                {
+                    "email": "%s",
+                    "password": "%s"
+                }
+                """.formatted(LOGIN_TEST_EMAIL, LOGIN_TEST_PASSWORD);
+
+        MvcResult loginResult = mockMvc.perform(post("/api/v1/members/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(loginBody))
+                .andReturn();
+
+        String cookieHeader = loginResult.getResponse().getHeader("Set-Cookie");
+        String token = cookieHeader.split("accessToken=")[1].split(";")[0];
 
         // when & then
-        mockMvc.perform(get("/api/v1/members/me").header("X-Member-Id", member.getId()))
+        mockMvc.perform(get("/api/v1/members/me").cookie(new MockCookie("accessToken", token)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultCode").value("200"))
                 .andExpect(jsonPath("$.msg").value("내 정보 조회 성공"))
                 .andExpect(jsonPath("$.data.memberId").value(member.getId()))
-                .andExpect(jsonPath("$.data.nickname").value("내정보유저"))
-                .andExpect(jsonPath("$.data.email").value("me-test@example.com"))
+                .andExpect(jsonPath("$.data.nickname").value("로그인테스터"))
+                .andExpect(jsonPath("$.data.email").value(LOGIN_TEST_EMAIL))
                 .andExpect(jsonPath("$.data.score").value(0))
                 .andExpect(jsonPath("$.data.tier").isEmpty())
                 .andExpect(jsonPath("$.data.role").value("USER"));
