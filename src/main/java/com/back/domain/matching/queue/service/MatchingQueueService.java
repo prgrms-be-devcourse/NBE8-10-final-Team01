@@ -79,13 +79,15 @@ public class MatchingQueueService {
             queue.addLast(waitingUser);
             currentSize = queue.size();
         }
+
         // 1차 빠른 체크: 4명 미만이면 굳이 매칭 함수까지 안 들어감
         if (currentSize < 4) {
             return new QueueStatusResponse(
                     "매칭 대기열에 참가했습니다.",
                     queueKey.category(),
                     queueKey.difficulty().name(),
-                    queue.size());
+                    currentSize // [변경] queue.size() 대신 락 안에서 구한 currentSize 사용
+                    );
         }
 
         // 4명 이상일 때만 실제 매칭 시도
@@ -96,12 +98,22 @@ public class MatchingQueueService {
                     "매칭 성사 및 방 생성 완료 (roomId=" + room.roomId() + ")",
                     queueKey.category(),
                     queueKey.difficulty().name(),
-                    queue.size());
+                    0 // [변경] 매칭 성공이면 이 유저는 더 이상 대기열에 없으므로 0으로 명확화
+                    );
         }
 
         // 아직 인원 부족이면 대기 상태 응답
+        int remainingSize; // [변경] 응답 직전 다시 읽을 값은 락으로 보호해서 조회
+        synchronized (queue) { // [변경]
+            remainingSize = queue.size(); // [변경]
+        }
+
         return new QueueStatusResponse(
-                "매칭 대기열에 참가했습니다.", queueKey.category(), queueKey.difficulty().name(), queue.size());
+                "매칭 대기열에 참가했습니다.",
+                queueKey.category(),
+                queueKey.difficulty().name(),
+                remainingSize // [변경] 락 밖 queue.size() 직접 호출 제거
+                );
     }
 
     public QueueStatusResponse cancelQueue(Long userId) {
@@ -137,10 +149,12 @@ public class MatchingQueueService {
             // 6. userQueueMap에서도 제거
             userQueueMap.remove(userId);
             currentSize = queue.size();
-        }
 
-        // 8. 해당 큐가 비어 있으면 삭제하고, 안 비어 있으면 그대로 둬라
-        waitingQueues.computeIfPresent(queueKey, (key, q) -> q.isEmpty() ? null : q);
+            // 8. 해당 큐가 비어 있으면 삭제하고, 안 비어 있으면 그대로 둬라
+            if (currentSize == 0) { // [변경] 빈 큐 정리를 락 안으로 이동
+                waitingQueues.remove(queueKey, queue); // [변경] 내가 잡고 있는 바로 그 queue일 때만 제거
+            }
+        }
 
         // 9. 응답 반환
         return new QueueStatusResponse(
