@@ -6,6 +6,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.back.domain.member.member.dto.JoinRequest;
+import com.back.domain.member.member.dto.LoginRequest;
+import com.back.domain.member.member.dto.LoginResponse;
 import com.back.domain.member.member.service.MemberService;
 import com.back.global.rsData.RsData;
 
@@ -21,7 +23,12 @@ public class MemberController {
     // 회원가입
     @PostMapping("/join")
     public RsData<Void> join(@Valid @RequestBody JoinRequest req) {
-        RsData<Void> res = memberService.join(req);
-        return res;
+        return memberService.join(req);
+    }
+
+    // 로그인
+    @PostMapping("/login")
+    public RsData<LoginResponse> login(@Valid @RequestBody LoginRequest req) {
+        return memberService.login(req);
     }
 }
