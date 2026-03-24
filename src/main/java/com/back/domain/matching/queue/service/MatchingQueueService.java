@@ -112,48 +112,56 @@ public class MatchingQueueService {
     }
 
     public QueueStatusResponse cancelQueue(Long userId) {
-        // 1. 유저가 어느 큐에 들어가 있는지 찾는다.
+        // 1) 유저가 어떤 큐에 들어가 있는지 조회
         QueueKey queueKey = userQueueMap.get(userId);
 
-        // 2. 대기열에 없는 유저면 예외 발생
+        // 2) 애초에 참가 중이 아니면 취소 불가
         if (queueKey == null) {
             throw new IllegalStateException("현재 매칭 대기열에 참가 중이 아닙니다.");
         }
 
-        // 3. 해당 큐를 가져온다.
+        // 3) 해당 큐 조회
         Deque<WaitingUser> queue = waitingQueues.get(queueKey);
-        AtomicInteger waitingCount = waitingCounts.get(queueKey);
 
-        // 4. 큐 자체가 없으면 비정상 상태
+        // 4) 큐가 없으면 비정상 상태
         if (queue == null) {
-            userQueueMap.remove(userId);
             throw new IllegalStateException("대기열 정보를 찾을 수 없습니다.");
         }
 
-        int currentSize;
         boolean removed;
+        int currentSize;
 
+        // 5) 큐 변경(remove)도 동시성 보호 필요
         synchronized (queue) {
-            // 5. 큐에서 해당 userId를 가진 WaitingUser 제거
+            AtomicInteger waitingCount = waitingCounts.get(queueKey); // [변경] waitingCount 조회를 락 안으로 이동
+
+            // [변경] queue는 있는데 waitingCount가 없으면 비정상 상태로 처리
+            if (waitingCount == null) {
+                throw new IllegalStateException("대기열 카운트 정보를 찾을 수 없습니다.");
+            }
+
+            // 6) 해당 유저를 큐에서 제거
             removed = queue.removeIf(waitingUser -> waitingUser.getUserId().equals(userId));
 
-            // 7. 큐에서 제거 실패 시 예외
+            // 7) 제거 실패 시 비정상 상태
             if (!removed) {
                 throw new IllegalStateException("대기열에서 사용자를 제거하지 못했습니다.");
             }
 
-            // 6. userQueueMap에서도 제거
+            // 8) 유저-큐 매핑 제거
             userQueueMap.remove(userId);
+
+            // 9) 대기 인원 수 감소
             currentSize = waitingCount.decrementAndGet();
+
+            // [변경] 마지막 인원이 빠져 0명이 되면 map 정리도 같은 락 안에서 수행
+            if (currentSize == 0) {
+                waitingQueues.remove(queueKey, queue);
+                waitingCounts.remove(queueKey, waitingCount);
+            }
         }
 
-        // 8. 해당 큐가 비어 있으면 삭제하고
-        if (currentSize == 0) {
-            waitingQueues.remove(queueKey);
-            waitingCounts.remove(queueKey);
-        }
-
-        // 9. 응답 반환
+        // 10) 취소 결과 반환
         return new QueueStatusResponse(
                 "매칭 대기열에서 취소되었습니다.", queueKey.category(), queueKey.difficulty().name(), currentSize);
     }
@@ -162,10 +170,12 @@ public class MatchingQueueService {
     private CreateRoomResponse tryMatchAndCreateRoom(QueueKey queueKey, Deque<WaitingUser> queue) {
 
         List<WaitingUser> matchedUsers;
-        AtomicInteger waitingCount = waitingCounts.get(queueKey);
+        AtomicInteger waitingCount; // [변경] 락 밖 조회 제거, 락 안에서 조회하도록 변경
 
         // 락 안에서는 4명 확인 + 4명 추출까지만 수행
         synchronized (queue) {
+            waitingCount = waitingCounts.get(queueKey); // [변경] waitingCount 조회를 락 안으로 이동
+
             // 2차 체크: 바깥에서 4명 이상이었더라도
             // 이 시점에는 다른 스레드가 먼저 가져갔을 수 있으므로 다시 확인 필요
             // 4명 미만이면 매칭 X
@@ -190,7 +200,7 @@ public class MatchingQueueService {
                 return null;
             }
 
-            waitingCount.addAndGet(-4);
+            waitingCount.addAndGet(-4); // [변경] 성공 전 map remove 하지 않고 count만 감소
         }
 
         // 4) 방 생성 API에 넘길 참가자 ID 목록 생성
@@ -210,9 +220,14 @@ public class MatchingQueueService {
             matchedUsers.forEach(user -> userQueueMap.remove(user.getUserId()));
 
             // 8) 이 큐가 비었으면 waitingQueues 맵에서 키 제거(메모리 정리)
-            if (waitingCount.get() == 0) {
-                waitingQueues.remove(queueKey);
-                waitingCounts.remove(queueKey);
+            synchronized (queue) { // [변경] 성공 후에만 다시 락 잡고 최종 정리
+                AtomicInteger latestWaitingCount = waitingCounts.get(queueKey); // [변경]
+
+                // [변경] 내가 처리하던 같은 카운터 객체가 아직 살아 있고, 실제 0명일 때만 제거
+                if (latestWaitingCount == waitingCount && latestWaitingCount.get() == 0) {
+                    waitingQueues.remove(queueKey, queue);
+                    waitingCounts.remove(queueKey, latestWaitingCount);
+                }
             }
 
             return response;
@@ -223,7 +238,7 @@ public class MatchingQueueService {
                 for (int i = matchedUsers.size() - 1; i >= 0; i--) {
                     queue.addFirst(matchedUsers.get(i));
                 }
-                waitingCount.addAndGet(matchedUsers.size());
+                waitingCount.addAndGet(matchedUsers.size()); // [변경] 같은 queue / 같은 count에 그대로 롤백
             }
             throw e;
         }
