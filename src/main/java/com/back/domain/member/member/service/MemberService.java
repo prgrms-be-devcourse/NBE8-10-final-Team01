@@ -8,7 +8,6 @@ import org.springframework.validation.annotation.Validated;
 
 import com.back.domain.member.member.dto.JoinRequest;
 import com.back.domain.member.member.dto.LoginRequest;
-import com.back.domain.member.member.dto.LoginResponse;
 import com.back.domain.member.member.entity.Member;
 import com.back.domain.member.member.repository.MemberRepository;
 import com.back.global.exception.ServiceException;
@@ -57,8 +56,8 @@ public class MemberService {
         return RsData.of("200", "회원가입성공");
     }
 
-    // 로그인
-    public RsData<LoginResponse> login(@Valid LoginRequest req) {
+    // 로그인 — 인증 성공 시 accessToken 문자열 반환 (쿠키 설정은 컨트롤러가 담당)
+    public String login(@Valid LoginRequest req) {
 
         // req null 방어
         if (req == null) {
@@ -78,13 +77,11 @@ public class MemberService {
             throw new ServiceException("MEMBER_401", "이메일 또는 비밀번호가 올바르지 않습니다");
         }
 
-        // JWT 토큰 발급
-        String accessToken = jwtProvider.createToken(
+        // JWT 토큰 생성 후 반환
+        return jwtProvider.createToken(
                 member.getId(),
                 member.getEmail(),
                 member.getNickname(),
                 member.getRole().getKey());
-
-        return RsData.of("200", "로그인 성공", new LoginResponse(accessToken));
     }
 }

@@ -1,6 +1,9 @@
 package com.back.domain.member.member.controller;
 
+import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -12,9 +15,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockCookie;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 
 import com.back.domain.member.member.entity.Member;
 import com.back.domain.member.member.repository.MemberRepository;
@@ -78,7 +83,7 @@ class MemberControllerTest {
     // ============ 로그인 ============
 
     @Test
-    @DisplayName("정상적인 로그인 요청 시 200 응답과 accessToken을 반환한다")
+    @DisplayName("정상적인 로그인 요청 시 200 응답과 accessToken 쿠키를 반환한다")
     void login_success() throws Exception {
         // given
         String requestBody = """
@@ -95,7 +100,39 @@ class MemberControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultCode").value("200"))
                 .andExpect(jsonPath("$.msg").value("로그인 성공"))
-                .andExpect(jsonPath("$.data.accessToken").isNotEmpty());
+                // 응답 바디에 토큰이 없어야 함
+                .andExpect(jsonPath("$.data").doesNotExist())
+                // Set-Cookie 헤더에 accessToken 쿠키가 존재해야 함
+                .andExpect(header().string("Set-Cookie", containsString("accessToken=")));
+    }
+
+    @Test
+    @DisplayName("로그아웃 요청 시 200 응답과 accessToken 쿠키가 만료된다")
+    void logout_success() throws Exception {
+        // given — 먼저 로그인해서 쿠키 획득
+        String loginBody = """
+                {
+                    "email": "%s",
+                    "password": "%s"
+                }
+                """.formatted(LOGIN_TEST_EMAIL, LOGIN_TEST_PASSWORD);
+
+        MvcResult loginResult = mockMvc.perform(post("/api/v1/members/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(loginBody))
+                .andReturn();
+
+        // 로그인 응답에서 accessToken 쿠키 추출
+        String cookieHeader = loginResult.getResponse().getHeader("Set-Cookie");
+        String token = cookieHeader.split("accessToken=")[1].split(";")[0];
+
+        // when & then — 쿠키를 담아 로그아웃 요청
+        mockMvc.perform(post("/api/v1/members/logout").cookie(new MockCookie("accessToken", token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.resultCode").value("200"))
+                .andExpect(jsonPath("$.msg").value("로그아웃 성공"))
+                // Set-Cookie 헤더에서 accessToken이 만료(Max-Age=0)되어야 함
+                .andExpect(cookie().maxAge("accessToken", 0));
     }
 
     @Test

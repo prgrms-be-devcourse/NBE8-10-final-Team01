@@ -31,7 +31,11 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         // 회원가입, 로그인은 인증 없이 접근 허용
-                        .requestMatchers("/api/v1/members/join", "/api/v1/members/login")
+                        .requestMatchers(
+                                "/api/v1/members/join",
+                                "/api/v1/members/login",
+                                // 로그아웃은 인증 없이도 호출 가능해야 함
+                                "/api/v1/members/logout")
                         .permitAll()
                         // 그 외 모든 요청은 인증 필요
                         .anyRequest()
