@@ -1,11 +1,9 @@
 package com.back.domain.member.member.controller;
 
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
+import com.back.domain.battle.result.dto.MyBattleResultsResponse;
+import com.back.domain.battle.result.service.BattleResultService;
 import com.back.domain.member.member.dto.JoinRequest;
 import com.back.domain.member.member.dto.LoginRequest;
 import com.back.domain.member.member.dto.MyInfoResponse;
@@ -23,6 +21,7 @@ import lombok.RequiredArgsConstructor;
 @RequestMapping("api/v1/members")
 public class MemberController {
     private final MemberService memberService;
+    private final BattleResultService battleResultService;
     private final Rq rq;
 
     // 회원가입
@@ -44,6 +43,34 @@ public class MemberController {
     public RsData<Void> logout() {
         rq.deleteCookie("accessToken");
         return RsData.of("200", "로그아웃 성공");
+    }
+
+    /**
+     * 내 전적 조회 API
+     *
+     * /api/v1/members/me/battle-results?page=0&size=20
+     *
+     * - memberId를 직접 받지 않고
+     * - rq.getActor() 로 현재 로그인 사용자를 가져온다.
+     * - 응답은 MemberController 스타일에 맞게 RsData 로 감싼다.
+     */
+    @GetMapping("/me/battle-results")
+    public RsData<MyBattleResultsResponse> getMyBattleResults(
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
+
+        // 현재 로그인 사용자 조회
+        Member actor = rq.getActor();
+
+        // 인증 정보가 없으면 로그인 필요 예외
+        if (actor == null) {
+            throw new ServiceException("MEMBER_401", "로그인이 필요합니다.");
+        }
+
+        // 배틀 도메인 서비스에서 실제 전적 조회 수행
+        MyBattleResultsResponse response = battleResultService.getMyBattleResults(actor.getId(), page, size);
+
+        // MemberController 쪽 응답 규약에 맞춰 RsData 로 감싸서 반환
+        return RsData.of("200", "내 전적 조회 성공", response);
     }
 
     // 내정보 조회
