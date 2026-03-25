@@ -1,5 +1,6 @@
 package com.back.domain.member.member.controller;
 
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -7,7 +8,10 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.back.domain.member.member.dto.JoinRequest;
 import com.back.domain.member.member.dto.LoginRequest;
+import com.back.domain.member.member.dto.MyInfoResponse;
+import com.back.domain.member.member.entity.Member;
 import com.back.domain.member.member.service.MemberService;
+import com.back.global.exception.ServiceException;
 import com.back.global.rq.Rq;
 import com.back.global.rsData.RsData;
 
@@ -40,5 +44,16 @@ public class MemberController {
     public RsData<Void> logout() {
         rq.deleteCookie("accessToken");
         return RsData.of("200", "로그아웃 성공");
+    }
+
+    // 내정보 조회
+    @GetMapping("/me")
+    public RsData<MyInfoResponse> getMyInfo() {
+        Member actor = rq.getActor();
+        if (actor == null || actor.getId() == null) {
+            throw new ServiceException("MEMBER_401", "로그인이 필요합니다");
+        }
+
+        return memberService.getMyInfo(actor.getId());
     }
 }

@@ -1,6 +1,7 @@
 package com.back.domain.member.member.controller;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -80,8 +81,40 @@ class MemberControllerTest {
                 .andExpect(jsonPath("$.msg").value("회원가입성공"));
     }
 
-    // ============ 로그인 ============
+    @Test
+    @DisplayName("내정보 조회 요청 시 회원 정보를 반환한다")
+    void getMyInfo_success() throws Exception {
+        // given - 로그인해서 accessToken 쿠키 확보
+        Member member = memberRepository.findByEmail(LOGIN_TEST_EMAIL).orElseThrow();
 
+        String loginBody = """
+                {
+                    "email": "%s",
+                    "password": "%s"
+                }
+                """.formatted(LOGIN_TEST_EMAIL, LOGIN_TEST_PASSWORD);
+
+        MvcResult loginResult = mockMvc.perform(post("/api/v1/members/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(loginBody))
+                .andReturn();
+
+        String cookieHeader = loginResult.getResponse().getHeader("Set-Cookie");
+        String token = cookieHeader.split("accessToken=")[1].split(";")[0];
+
+        // when & then
+        mockMvc.perform(get("/api/v1/members/me").cookie(new MockCookie("accessToken", token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.resultCode").value("200"))
+                .andExpect(jsonPath("$.msg").value("내 정보 조회 성공"))
+                .andExpect(jsonPath("$.data.memberId").value(member.getId()))
+                .andExpect(jsonPath("$.data.nickname").value("로그인테스터"))
+                .andExpect(jsonPath("$.data.email").value(LOGIN_TEST_EMAIL))
+                .andExpect(jsonPath("$.data.score").value(0))
+                .andExpect(jsonPath("$.data.tier").isEmpty())
+                .andExpect(jsonPath("$.data.role").value("USER"));
+    }
+    // ============ 로그인 ============
     @Test
     @DisplayName("정상적인 로그인 요청 시 200 응답과 accessToken 쿠키를 반환한다")
     void login_success() throws Exception {

@@ -8,6 +8,7 @@ import org.springframework.validation.annotation.Validated;
 
 import com.back.domain.member.member.dto.JoinRequest;
 import com.back.domain.member.member.dto.LoginRequest;
+import com.back.domain.member.member.dto.MyInfoResponse;
 import com.back.domain.member.member.entity.Member;
 import com.back.domain.member.member.repository.MemberRepository;
 import com.back.global.exception.ServiceException;
@@ -54,6 +55,18 @@ public class MemberService {
         memberRepository.save(member);
 
         return RsData.of("200", "회원가입성공");
+    }
+
+    public RsData<MyInfoResponse> getMyInfo(Long memberId) {
+        if (memberId == null || memberId <= 0) {
+            throw new ServiceException("MEMBER_400", "유효한 회원 ID가 필요합니다");
+        }
+
+        Member member = memberRepository
+                .findById(memberId)
+                .orElseThrow(() -> new ServiceException("MEMBER_404", "존재하지 않는 회원입니다"));
+
+        return RsData.of("200", "내 정보 조회 성공", MyInfoResponse.from(member));
     }
 
     // 로그인 — 인증 성공 시 accessToken 문자열 반환 (쿠키 설정은 컨트롤러가 담당)
