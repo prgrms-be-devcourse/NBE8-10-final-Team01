@@ -20,6 +20,7 @@ import com.back.domain.battle.battleroom.dto.CreateRoomResponse;
 import com.back.domain.battle.battleroom.service.BattleRoomService;
 import com.back.domain.matching.queue.adapter.QueueProblemPicker;
 import com.back.domain.matching.queue.dto.QueueJoinRequest;
+import com.back.domain.matching.queue.dto.QueueStateResponse;
 import com.back.domain.matching.queue.dto.QueueStatusResponse;
 import com.back.domain.matching.queue.model.Difficulty;
 import com.back.domain.matching.queue.model.QueueKey;
@@ -233,5 +234,56 @@ class MatchingQueueServiceTest {
 
     private QueueJoinRequest createRequest(String category, Difficulty difficulty) {
         return new QueueJoinRequest(category, difficulty);
+    }
+
+    @Test
+    @DisplayName("큐에 없는 사용자는 inQueue=false를 반환한다")
+    void getMyQueueState_returnsFalse_whenUserNotInQueue() {
+        // given
+        Long userId = 99L;
+
+        // when
+        QueueStateResponse response = matchingQueueService.getMyQueueState(userId);
+
+        // then
+        assertThat(response.inQueue()).isFalse();
+        assertThat(response.category()).isNull();
+        assertThat(response.difficulty()).isNull();
+        assertThat(response.waitingCount()).isEqualTo(0);
+    }
+
+    @Test
+    @DisplayName("큐에 있는 사용자는 현재 큐 정보를 반환한다")
+    void getMyQueueState_returnsQueueInfo_whenUserInQueue() {
+        // given
+        Long userId = 1L;
+        matchingQueueService.joinQueue(userId, createRequest("Array", Difficulty.EASY));
+
+        // when
+        QueueStateResponse response = matchingQueueService.getMyQueueState(userId);
+
+        // then
+        assertThat(response.inQueue()).isTrue();
+        assertThat(response.category()).isEqualTo("ARRAY");
+        assertThat(response.difficulty()).isEqualTo("EASY");
+        assertThat(response.waitingCount()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("큐 취소 후 다시 조회하면 inQueue=false를 반환한다")
+    void getMyQueueState_returnsFalse_afterCancel() {
+        // given
+        Long userId = 1L;
+        matchingQueueService.joinQueue(userId, createRequest("Array", Difficulty.EASY));
+        matchingQueueService.cancelQueue(userId);
+
+        // when
+        QueueStateResponse response = matchingQueueService.getMyQueueState(userId);
+
+        // then
+        assertThat(response.inQueue()).isFalse();
+        assertThat(response.category()).isNull();
+        assertThat(response.difficulty()).isNull();
+        assertThat(response.waitingCount()).isEqualTo(0);
     }
 }

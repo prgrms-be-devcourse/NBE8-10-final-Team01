@@ -8,6 +8,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,11 +22,13 @@ import com.back.domain.battle.battleroom.entity.BattleRoomStatus;
 import com.back.domain.battle.battleroom.repository.BattleRoomRepository;
 import com.back.domain.battle.result.dto.BattleResultResponse;
 import com.back.domain.battle.result.dto.BattleResultResponse.ParticipantResult;
+import com.back.domain.battle.result.dto.MyBattleResultsResponse;
 import com.back.domain.battle.result.dto.RoomListResponse;
 import com.back.domain.member.member.repository.MemberRepository;
 import com.back.domain.problem.submission.entity.Submission;
 import com.back.domain.problem.submission.entity.SubmissionResult;
 import com.back.domain.problem.submission.repository.SubmissionRepository;
+import com.back.global.exception.ServiceException;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -179,5 +183,34 @@ public class BattleResultService {
                 room, participant.getMember(), SubmissionResult.WA, participant.getFinishTime());
 
         return elapsedSeconds + (waPenaltyCount * WA_PENALTY_SECONDS);
+    }
+
+    /**
+     * 현재 로그인 사용자의 전적 목록 조회용 서비스 메서드
+     *
+     * memberId:
+     * - 컨트롤러에서 rq.getActor() 로 꺼낸 현재 사용자 id
+     *
+     * page, size:
+     * - 0-based 페이지 기준
+     */
+    @Transactional(readOnly = true)
+    public MyBattleResultsResponse getMyBattleResults(Long memberId, int page, int size) {
+        // 로그인 사용자 없이 호출되면 예외
+        if (memberId == null) {
+            throw new ServiceException("MEMBER_401", "로그인이 필요합니다.");
+        }
+
+        // 잘못된 페이지 파라미터 방어
+        if (page < 0 || size < 1) {
+            throw new ServiceException("MEMBER_400", "page는 0 이상이고 size는 1 이상이어야 합니다.");
+        }
+
+        // 종료된(FINISHED) 배틀만 전적으로 조회
+        Page<BattleParticipant> participantPage = battleParticipantRepository.findFinishedBattleResultsByMemberId(
+                memberId, BattleRoomStatus.FINISHED, PageRequest.of(page, size));
+
+        // 엔티티 페이지를 응답 DTO로 변환
+        return MyBattleResultsResponse.from(participantPage);
     }
 }
