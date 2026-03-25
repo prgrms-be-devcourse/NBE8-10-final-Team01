@@ -18,8 +18,8 @@ code_review:
     help: false
     # 별도 요약 코멘트 비활성화(중복 방지)
     summary: false
-    # PR 오픈 시 코드리뷰 코멘트 생성 비활성화
-    code_review: false
+    # PR 오픈 시 코드리뷰 코멘트 생성 활성화
+    code_review: true
   # Draft PR은 자동 리뷰하지 않음
   include_drafts: false
 

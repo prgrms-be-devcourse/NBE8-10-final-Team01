@@ -29,6 +29,10 @@ spring:
         default_batch_fetch_size: 100
   security:
     debug: true
+
+jwt:
+  secret: ${JWT_SECRET:back-application-jwt-secret-key-must-be-at-least-32-bytes}
+  expiration: 3600000 # 1시간 (ms)
 springdoc:
   default-produces-media-type: application/json;charset=UTF-8
 logging:

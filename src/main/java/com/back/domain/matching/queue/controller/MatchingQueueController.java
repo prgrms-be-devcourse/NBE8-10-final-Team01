@@ -3,6 +3,7 @@ package com.back.domain.matching.queue.controller;
 import org.springframework.web.bind.annotation.*;
 
 import com.back.domain.matching.queue.dto.QueueJoinRequest;
+import com.back.domain.matching.queue.dto.QueueStateResponse;
 import com.back.domain.matching.queue.dto.QueueStatusResponse;
 import com.back.domain.matching.queue.service.MatchingQueueService;
 
@@ -22,6 +23,11 @@ public class MatchingQueueController {
      * 지금은 테스트를 위해 userId를 요청 파라미터로 받는다.
      * 나중에는 JWT에서 userId를 꺼내도록 바꿀 수 있다.
      */
+    @GetMapping("/me")
+    public QueueStateResponse getMyQueueState(@RequestParam Long userId) {
+        return matchingQueueService.getMyQueueState(userId);
+    }
+
     @PostMapping("/join")
     public QueueStatusResponse joinQueue(@RequestParam Long userId, @Valid @RequestBody QueueJoinRequest request) {
         return matchingQueueService.joinQueue(userId, request);

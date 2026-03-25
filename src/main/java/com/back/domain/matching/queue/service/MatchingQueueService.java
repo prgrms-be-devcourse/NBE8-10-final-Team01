@@ -13,7 +13,9 @@ import com.back.domain.battle.battleroom.dto.CreateRoomRequest;
 import com.back.domain.battle.battleroom.dto.CreateRoomResponse;
 import com.back.domain.battle.battleroom.service.BattleRoomService;
 import com.back.domain.matching.queue.adapter.QueueProblemPicker;
+import com.back.domain.matching.queue.dto.MatchStateResponse;
 import com.back.domain.matching.queue.dto.QueueJoinRequest;
+import com.back.domain.matching.queue.dto.QueueStateResponse;
 import com.back.domain.matching.queue.dto.QueueStatusResponse;
 import com.back.domain.matching.queue.model.QueueKey;
 import com.back.domain.matching.queue.model.WaitingUser;
@@ -58,6 +60,10 @@ public class MatchingQueueService {
 
     private final QueueProblemPicker queueProblemPicker;
 
+    // 매칭 완료 후 유저가 어느 방으로 가야 하는지 저장
+    // 예: 1L -> 10L (user1 은 room10 으로 이동해야 함)
+    private final Map<Long, Long> matchedRoomMap = new ConcurrentHashMap<>();
+
     public QueueStatusResponse joinQueue(Long userId, QueueJoinRequest request) {
         // 이미 대기열에 들어가 있는 유저는 다시 참가할 수 없다.
         QueueKey queueKey = new QueueKey(request.getCategory(), request.getDifficulty());
@@ -78,13 +84,15 @@ public class MatchingQueueService {
             queue.addLast(waitingUser);
             currentSize = queue.size();
         }
+
         // 1차 빠른 체크: 4명 미만이면 굳이 매칭 함수까지 안 들어감
         if (currentSize < 4) {
             return new QueueStatusResponse(
                     "매칭 대기열에 참가했습니다.",
                     queueKey.category(),
                     queueKey.difficulty().name(),
-                    queue.size());
+                    currentSize // \ queue.size() 대신 락 안에서 구한 currentSize 사용
+                    );
         }
 
         // 4명 이상일 때만 실제 매칭 시도
@@ -95,12 +103,22 @@ public class MatchingQueueService {
                     "매칭 성사 및 방 생성 완료 (roomId=" + room.roomId() + ")",
                     queueKey.category(),
                     queueKey.difficulty().name(),
-                    queue.size());
+                    0 //  매칭 성공이면 이 유저는 더 이상 대기열에 없으므로 0으로 명확화
+                    );
         }
 
         // 아직 인원 부족이면 대기 상태 응답
+        int remainingSize; //  응답 직전 다시 읽을 값은 락으로 보호해서 조회
+        synchronized (queue) {
+            remainingSize = queue.size();
+        }
+
         return new QueueStatusResponse(
-                "매칭 대기열에 참가했습니다.", queueKey.category(), queueKey.difficulty().name(), queue.size());
+                "매칭 대기열에 참가했습니다.",
+                queueKey.category(),
+                queueKey.difficulty().name(),
+                remainingSize // 락 밖 queue.size() 직접 호출 제거
+                );
     }
 
     public QueueStatusResponse cancelQueue(Long userId) {
@@ -136,10 +154,12 @@ public class MatchingQueueService {
             // 6. userQueueMap에서도 제거
             userQueueMap.remove(userId);
             currentSize = queue.size();
-        }
 
-        // 8. 해당 큐가 비어 있으면 삭제하고, 안 비어 있으면 그대로 둬라
-        waitingQueues.computeIfPresent(queueKey, (key, q) -> q.isEmpty() ? null : q);
+            // 8. 해당 큐가 비어 있으면 삭제하고, 안 비어 있으면 그대로 둬라
+            if (currentSize == 0) { //  빈 큐 정리를 락 안으로 이동
+                waitingQueues.remove(queueKey, queue); //  내가 잡고 있는 바로 그 queue일 때만 제거
+            }
+        }
 
         // 9. 응답 반환
         return new QueueStatusResponse(
@@ -192,10 +212,20 @@ public class MatchingQueueService {
 
             // 7) 방 생성 성공 시에만 "유저-큐 맵"에서 매칭된 유저 제거
             //    (실패했는데 먼저 제거하면 상태 꼬임 발생)
-            matchedUsers.forEach(user -> userQueueMap.remove(user.getUserId()));
+            // 매칭 성공 시 4명 모두 큐에서는 제거하고, roomId를 저장
+            Long roomId = response.roomId();
+
+            matchedUsers.forEach(user -> {
+                userQueueMap.remove(user.getUserId());
+                matchedRoomMap.put(user.getUserId(), roomId);
+            });
 
             // 8) 이 큐가 비었으면 waitingQueues 맵에서 키 제거(메모리 정리)
-            waitingQueues.computeIfPresent(queueKey, (k, q) -> q.isEmpty() ? null : q);
+            synchronized (queue) { //  성공 후 같은 queue 락 안에서 직접 확인 후 제거
+                if (queue.isEmpty()) { //  플래그 대신 현재 시점의 실제 상태 확인
+                    waitingQueues.remove(queueKey, queue); // 내가 처리한 바로 그 queue일 때만 제거
+                }
+            }
 
             return response;
         } catch (RuntimeException e) {
@@ -210,6 +240,58 @@ public class MatchingQueueService {
         }
     }
 
+    public QueueStateResponse getMyQueueState(Long userId) {
+        QueueKey queueKey = userQueueMap.get(userId);
+
+        // 현재 어떤 큐에도 들어가 있지 않으면 false 반환
+        if (queueKey == null) {
+            return new QueueStateResponse(false, null, null, 0);
+        }
+
+        Deque<WaitingUser> queue = waitingQueues.get(queueKey);
+
+        // 맵에는 있는데 실제 큐가 없으면 비정상 상태지만, 조회는 안전하게 false 처리
+        // 불일치 발견: userQueueMap에는 있으나 실제 대기열(waitingQueues)에는 없음
+        if (queue == null) {
+            // 원자적으로 제거 (내가 확인했던 그 queueKey일 때만 제거하여 동시성 이슈 방지)
+            userQueueMap.remove(userId, queueKey);
+
+            // 로그를 남겨 추적 가능하게 함
+            // log.warn("Inconsistency detected: User {} was in userQueueMap but queue {} was missing. Cleaned up.",
+            // userId, queueKey);
+
+            return new QueueStateResponse(false, null, null, 0);
+        }
+
+        return new QueueStateResponse(
+                true, queueKey.category(), queueKey.difficulty().name(), queue.size());
+    }
+
+    // 현재 사용자의 매칭 상태 조회
+    public MatchStateResponse getMyMatchState(Long userId) {
+        Long roomId = matchedRoomMap.get(userId);
+
+        // 이미 방이 배정된 상태
+        if (roomId != null) {
+            return new MatchStateResponse("MATCHED", roomId);
+        }
+
+        // 아직 큐에서 기다리는 중
+        if (userQueueMap.containsKey(userId)) {
+            return new MatchStateResponse("SEARCHING", null);
+        }
+
+        // 큐에도 없고, 배정된 방도 없는 상태
+        return new MatchStateResponse("IDLE", null);
+    }
+
+    // 방 입장 성공 후 해당 유저의 매칭 결과 정리
+    public void clearMatchedRoom(Long userId, Long roomId) {
+        // userId 에 저장된 roomId 가 지금 입장한 roomId 일 때만 제거
+        matchedRoomMap.remove(userId, roomId);
+    }
+
+    // 찬의님 연동 지점 (여기만 나중에 연결하면 됨)
     private Long resolveProblemIdForMatch(QueueKey queueKey, List<Long> participantIds) {
         return queueProblemPicker.pick(queueKey, participantIds);
     }
