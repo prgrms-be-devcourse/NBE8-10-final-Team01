@@ -86,7 +86,7 @@ public class JudgeService {
         submission.applyJudgeResult(judgeResult, passedCount, totalCount);
         submissionRepository.save(submission);
 
-        // WebSocket: 제출 결과 브로드캐스트
+        // WebSocket: 제출 결과 브로드캐스트 (알림)
         messagingTemplate.convertAndSend(
                 "/topic/room/" + roomId,
                 Map.of(
@@ -96,9 +96,14 @@ public class JudgeService {
                         "passedCount", passedCount,
                         "totalCount", totalCount));
 
+        /*
+         * result != AC일 때
+         * SUBMISSION 브로드캐스트만 하고 끝. handleAc()가 호출되지 않으므로 participant 상태 변경 없음, 정산도 없음.
+         */
         if (judgeResult == SubmissionResult.AC) {
             handleAc(roomId, memberId);
         }
+        // SUBMISSION 브로드캐스트는 알림이고, AC일 때만 참여자 완료 처리 → 전원 완료 시 정산까지 연결
     }
 
     private void handleAc(Long roomId, Long memberId) {
@@ -113,6 +118,10 @@ public class JudgeService {
                 .findByBattleRoomAndMember(room, member)
                 .orElseThrow(() -> new IllegalStateException("Participant not found"));
 
+        /*
+         * status: PLAYING에서 EXIT
+         * finishTime 기록
+         */
         participant.complete(LocalDateTime.now());
         battleParticipantRepository.save(participant);
 
@@ -120,11 +129,20 @@ public class JudgeService {
         long completedCount = allParticipants.stream()
                 .filter(p -> p.getStatus() == BattleParticipantStatus.EXIT)
                 .count();
-
+        // PARTICIPANT_DONE 브로드캐스트
         messagingTemplate.convertAndSend(
                 "/topic/room/" + roomId,
                 Map.of("type", "PARTICIPANT_DONE", "userId", memberId, "rank", completedCount));
 
+        /*
+         * 전원 EXIT 체크
+         *     → 아직 남은 사람 있으면 종료
+         *     → 전원 완료면 battleResultService.settle() 호출
+         *         → 순위/점수 계산
+         *         → member.score 갱신
+         *         → room.finish() → status: FINISHED
+         *         → BATTLE_FINISHED 브로드캐스트
+         */
         boolean allFinished = allParticipants.stream().allMatch(p -> p.getStatus() == BattleParticipantStatus.EXIT);
         if (allFinished) {
             battleResultService.settle(roomId);

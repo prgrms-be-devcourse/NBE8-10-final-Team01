@@ -9,3 +9,6 @@ spring:
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
+
+judge0:
+  url: http://JUDGE0_EC2_IP:2358
