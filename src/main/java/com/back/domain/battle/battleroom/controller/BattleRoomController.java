@@ -15,6 +15,7 @@ import com.back.domain.battle.battleroom.dto.JoinRoomRequest;
 import com.back.domain.battle.battleroom.dto.JoinRoomResponse;
 import com.back.domain.battle.battleroom.dto.RoomResponse;
 import com.back.domain.battle.battleroom.service.BattleRoomService;
+import com.back.domain.matching.queue.service.MatchingQueueService;
 
 import lombok.RequiredArgsConstructor;
 
@@ -24,6 +25,7 @@ import lombok.RequiredArgsConstructor;
 public class BattleRoomController {
 
     private final BattleRoomService battleRoomService;
+    private final MatchingQueueService matchingQueueService;
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
@@ -33,7 +35,11 @@ public class BattleRoomController {
 
     @PostMapping("/{roomId}/join")
     public JoinRoomResponse joinRoom(@PathVariable Long roomId, @RequestBody JoinRoomRequest request) {
-        return battleRoomService.joinRoom(roomId, request.memberId());
+        JoinRoomResponse response = battleRoomService.joinRoom(roomId, request.memberId());
+
+        // 이 유저는 이제 실제로 방 입장까지 끝났으므로 매칭 결과 정리
+        matchingQueueService.clearMatchedRoom(request.memberId(), roomId);
+        return response;
     }
 
     @GetMapping("/{roomId}")

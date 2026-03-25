@@ -6,6 +6,7 @@ import com.back.domain.battle.result.dto.MyBattleResultsResponse;
 import com.back.domain.battle.result.service.BattleResultService;
 import com.back.domain.member.member.dto.JoinRequest;
 import com.back.domain.member.member.dto.LoginRequest;
+import com.back.domain.member.member.dto.MyInfoResponse;
 import com.back.domain.member.member.entity.Member;
 import com.back.domain.member.member.service.MemberService;
 import com.back.global.exception.ServiceException;
@@ -70,5 +71,16 @@ public class MemberController {
 
         // MemberController 쪽 응답 규약에 맞춰 RsData 로 감싸서 반환
         return RsData.of("200", "내 전적 조회 성공", response);
+    }
+  
+    // 내정보 조회
+    @GetMapping("/me")
+    public RsData<MyInfoResponse> getMyInfo() {
+        Member actor = rq.getActor();
+        if (actor == null || actor.getId() == null) {
+            throw new ServiceException("MEMBER_401", "로그인이 필요합니다");
+        }
+
+        return memberService.getMyInfo(actor.getId());
     }
 }
