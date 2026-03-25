@@ -13,6 +13,7 @@ import com.back.domain.battle.battleroom.dto.CreateRoomRequest;
 import com.back.domain.battle.battleroom.dto.CreateRoomResponse;
 import com.back.domain.battle.battleroom.service.BattleRoomService;
 import com.back.domain.matching.queue.adapter.QueueProblemPicker;
+import com.back.domain.matching.queue.dto.MatchStateResponse;
 import com.back.domain.matching.queue.dto.QueueJoinRequest;
 import com.back.domain.matching.queue.dto.QueueStateResponse;
 import com.back.domain.matching.queue.dto.QueueStatusResponse;
@@ -58,6 +59,10 @@ public class MatchingQueueService {
     private final BattleRoomService battleRoomService;
 
     private final QueueProblemPicker queueProblemPicker;
+
+    // 매칭 완료 후 유저가 어느 방으로 가야 하는지 저장
+    // 예: 1L -> 10L (user1 은 room10 으로 이동해야 함)
+    private final Map<Long, Long> matchedRoomMap = new ConcurrentHashMap<>();
 
     public QueueStatusResponse joinQueue(Long userId, QueueJoinRequest request) {
         // 이미 대기열에 들어가 있는 유저는 다시 참가할 수 없다.
@@ -207,7 +212,13 @@ public class MatchingQueueService {
 
             // 7) 방 생성 성공 시에만 "유저-큐 맵"에서 매칭된 유저 제거
             //    (실패했는데 먼저 제거하면 상태 꼬임 발생)
-            matchedUsers.forEach(user -> userQueueMap.remove(user.getUserId()));
+            // 매칭 성공 시 4명 모두 큐에서는 제거하고, roomId를 저장
+            Long roomId = response.roomId();
+
+            matchedUsers.forEach(user -> {
+                userQueueMap.remove(user.getUserId());
+                matchedRoomMap.put(user.getUserId(), roomId);
+            });
 
             // 8) 이 큐가 비었으면 waitingQueues 맵에서 키 제거(메모리 정리)
             synchronized (queue) { //  성공 후 같은 queue 락 안에서 직접 확인 후 제거
@@ -254,6 +265,30 @@ public class MatchingQueueService {
 
         return new QueueStateResponse(
                 true, queueKey.category(), queueKey.difficulty().name(), queue.size());
+    }
+
+    // 현재 사용자의 매칭 상태 조회
+    public MatchStateResponse getMyMatchState(Long userId) {
+        Long roomId = matchedRoomMap.get(userId);
+
+        // 이미 방이 배정된 상태
+        if (roomId != null) {
+            return new MatchStateResponse("MATCHED", roomId);
+        }
+
+        // 아직 큐에서 기다리는 중
+        if (userQueueMap.containsKey(userId)) {
+            return new MatchStateResponse("SEARCHING", null);
+        }
+
+        // 큐에도 없고, 배정된 방도 없는 상태
+        return new MatchStateResponse("IDLE", null);
+    }
+
+    // 방 입장 성공 후 해당 유저의 매칭 결과 정리
+    public void clearMatchedRoom(Long userId, Long roomId) {
+        // userId 에 저장된 roomId 가 지금 입장한 roomId 일 때만 제거
+        matchedRoomMap.remove(userId, roomId);
     }
 
     // 찬의님 연동 지점 (여기만 나중에 연결하면 됨)
