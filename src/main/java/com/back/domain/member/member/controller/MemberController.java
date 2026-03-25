@@ -72,7 +72,7 @@ public class MemberController {
         // MemberController 쪽 응답 규약에 맞춰 RsData 로 감싸서 반환
         return RsData.of("200", "내 전적 조회 성공", response);
     }
-  
+
     // 내정보 조회
     @GetMapping("/me")
     public RsData<MyInfoResponse> getMyInfo() {
