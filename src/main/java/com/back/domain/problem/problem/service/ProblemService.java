@@ -1,15 +1,20 @@
 package com.back.domain.problem.problem.service;
 
+import java.util.List;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.back.domain.problem.languageprofile.entity.ProblemLanguageProfile;
+import com.back.domain.problem.languageprofile.repository.ProblemLanguageProfileRepository;
 import com.back.domain.problem.problem.dto.ProblemDetailResponse;
 import com.back.domain.problem.problem.dto.ProblemListResponse;
 import com.back.domain.problem.problem.entity.Problem;
 import com.back.domain.problem.problem.repository.ProblemRepository;
+import com.back.domain.problem.testcase.entity.TestCase;
 import com.back.global.exception.ServiceException;
 
 import lombok.RequiredArgsConstructor;
@@ -22,6 +27,7 @@ public class ProblemService {
     private static final int MAX_PAGE_SIZE = 100;
 
     private final ProblemRepository problemRepository;
+    private final ProblemLanguageProfileRepository problemLanguageProfileRepository;
 
     public ProblemListResponse getProblems(int page, int size) {
         if (page < 0) {
@@ -46,6 +52,35 @@ public class ProblemService {
                 .findById(problemId)
                 .orElseThrow(() -> new ServiceException("404-1", "존재하지 않는 문제입니다."));
 
-        return ProblemDetailResponse.from(problem);
+        List<ProblemLanguageProfile> languageProfiles =
+                problemLanguageProfileRepository.findByProblemIdOrderByIdAsc(problemId);
+
+        List<String> supportedLanguages = languageProfiles.stream()
+                .map(ProblemLanguageProfile::getLanguageCode)
+                .distinct()
+                .toList();
+
+        String defaultLanguage = languageProfiles.stream()
+                .filter(profile -> Boolean.TRUE.equals(profile.getIsDefault()))
+                .findFirst()
+                .map(ProblemLanguageProfile::getLanguageCode)
+                .or(() -> languageProfiles.stream().findFirst().map(ProblemLanguageProfile::getLanguageCode))
+                .orElse(null);
+
+        List<ProblemDetailResponse.StarterCode> starterCodes = languageProfiles.stream()
+                .map(profile ->
+                        new ProblemDetailResponse.StarterCode(profile.getLanguageCode(), profile.getStarterCode()))
+                .toList();
+
+        List<ProblemDetailResponse.SampleCase> sampleCases = problem.getTestCases().stream()
+                .filter(tc -> Boolean.TRUE.equals(tc.getIsSample()))
+                .map(this::toSampleCase)
+                .toList();
+
+        return ProblemDetailResponse.from(problem, supportedLanguages, defaultLanguage, starterCodes, sampleCases);
+    }
+
+    private ProblemDetailResponse.SampleCase toSampleCase(TestCase testCase) {
+        return new ProblemDetailResponse.SampleCase(testCase.getInput(), testCase.getExpectedOutput());
     }
 }
