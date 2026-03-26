@@ -3,6 +3,7 @@ package com.back.domain.problem.submission.service;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,7 +20,7 @@ import com.back.domain.problem.submission.dto.SubmitRequest;
 import com.back.domain.problem.submission.entity.Submission;
 import com.back.domain.problem.submission.repository.SubmissionRepository;
 import com.back.domain.problem.testcase.entity.TestCase;
-import com.back.global.judge.JudgeService;
+import com.back.global.judge.event.JudgeRequestedEvent;
 
 import lombok.RequiredArgsConstructor;
 
@@ -31,7 +32,7 @@ public class SubmissionService {
     private final BattleParticipantRepository battleParticipantRepository;
     private final MemberRepository memberRepository;
     private final SubmissionRepository submissionRepository;
-    private final JudgeService judgeService;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public SubmissionResponse submit(SubmitRequest request) {
@@ -54,7 +55,7 @@ public class SubmissionService {
                 .findById(request.memberId())
                 .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 회원입니다."));
 
-        // 3. BattleParticipant 조회 + 제출 가능 상태 검증
+        // 3. BattleParticipant 조회 + 제출 가능 상태(PLAYING) 검증
         BattleParticipant participant = battleParticipantRepository
                 .findByBattleRoomAndMember(room, member)
                 .orElseThrow(() -> new IllegalArgumentException("해당 방의 참여자가 아닙니다."));
@@ -67,12 +68,13 @@ public class SubmissionService {
         Submission submission = Submission.create(room, member, request.code(), request.language());
         submissionRepository.save(submission);
 
-        // 5. 테스트케이스 로드 후 비동기 채점 시작 → 즉시 JUDGING 응답
+        // 5. 테스트케이스 로드 후 이벤트 발행 → 트랜잭션 커밋 후 비동기 채점 시작 → 즉시 JUDGING 응답
         // new ArrayList<>()로 강제 초기화: PersistentBag을 트랜잭션 안에서 일반 List로 변환,
         // 트랜잭션 종료 후 세션이 닫혀도 JudgeService에서 안전하게 접근 가능
         List<TestCase> testCases = new ArrayList<>(room.getProblem().getTestCases());
-        judgeService.judge(
-                submission.getId(), room.getId(), member.getId(), request.code(), request.language(), testCases);
+        // 이벤트 기반으로 변경: 이벤트를 발행하고 끝, JudgeService에서 수신해서 judge실행
+        eventPublisher.publishEvent(new JudgeRequestedEvent(
+                submission.getId(), room.getId(), member.getId(), request.code(), request.language(), testCases));
 
         return new SubmissionResponse(submission.getId(), "JUDGING", 0, 0);
     }

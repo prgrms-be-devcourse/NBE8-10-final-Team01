@@ -7,6 +7,8 @@ import java.util.Map;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 import com.back.domain.battle.battleparticipant.entity.BattleParticipant;
 import com.back.domain.battle.battleparticipant.entity.BattleParticipantStatus;
@@ -22,6 +24,7 @@ import com.back.domain.problem.submission.repository.SubmissionRepository;
 import com.back.domain.problem.testcase.entity.TestCase;
 import com.back.global.judge.dto.Judge0SubmitRequest;
 import com.back.global.judge.dto.Judge0SubmitResponse;
+import com.back.global.judge.event.JudgeRequestedEvent;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -43,28 +46,43 @@ public class JudgeService {
     private final SimpMessagingTemplate messagingTemplate;
 
     /**
-     * 비동기 채점 실행. SubmissionService에서 저장 직후 호출된다.
-     * testCases는 SubmissionService 트랜잭션 안에서 미리 로드된 데이터이며,
-     * 직접 컬럼 필드(input, expectedOutput)만 사용하므로 detach 후에도 안전하다.
+     * 트랜잭션 커밋 후 비동기 채점 실행.
+     * @TransactionalEventListener(AFTER_COMMIT) 으로 커밋 확정 후 실행이 보장되므로
+     * 이후 findById(submissionId) 호출 시 레코드가 반드시 존재한다.
      */
     @Async
-    public void judge(
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void onJudgeRequested(JudgeRequestedEvent event) {
+        judge(
+                event.submissionId(),
+                event.roomId(),
+                event.memberId(),
+                event.code(),
+                event.language(),
+                event.testCases());
+    }
+
+    private void judge(
             Long submissionId, Long roomId, Long memberId, String code, String language, List<TestCase> testCases) {
 
+        // 문제에 있는 테스트 케이스의 총 개수
         int totalCount = testCases.size();
         SubmissionResult judgeResult;
         int passedCount = 0;
 
+        // 테스트케이스가 0개의 경우 WA처리
         if (totalCount == 0) {
             log.warn("Submission {} has no test cases, marking as WA", submissionId);
             judgeResult = SubmissionResult.WA;
-        } else {
+        } else { // 테스트 케이스가 1개 이상의 경우
             int languageId = getLanguageId(language);
+
+            // 배치 요청 구성
             List<Judge0SubmitRequest> batchRequests = testCases.stream()
                     .map(tc -> new Judge0SubmitRequest(
                             code, languageId, tc.getInput() != null ? tc.getInput() : "", tc.getExpectedOutput()))
                     .toList();
-
+            // judge 실행 (10초간 1초마다 풀링)
             List<Judge0SubmitResponse> results = runJudge(batchRequests);
             results.forEach(r -> log.info(
                     "Judge0 result: token={}, statusId={}, stderr={}, compileOutput={}, message={}",
@@ -73,13 +91,16 @@ public class JudgeService {
                     r.stderr(),
                     r.compileOutput(),
                     r.message()));
+            // 결과 집계
+            // 우선순위: CE(6) > RE(7~14) > TLE(5) > WA > AC(3)
+            //  passedCount = status.id == 3 인 케이스 수
             judgeResult = aggregateResult(results, totalCount);
             passedCount = (int) results.stream()
                     .filter(r -> r.status() != null && r.status().id() == 3)
                     .count();
         }
 
-        // 결과 저장 — 폴링 완료 시점에는 SubmissionService 트랜잭션이 반드시 커밋된 상태
+        // 결과 저장 — @TransactionalEventListener(AFTER_COMMIT) 으로 커밋 확정 후 실행되므로 안전
         Submission submission = submissionRepository
                 .findById(submissionId)
                 .orElseThrow(() -> new IllegalStateException("Submission not found: " + submissionId));
