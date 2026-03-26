@@ -2,7 +2,6 @@ package com.back.domain.problem.run.controller;
 
 import java.util.Map;
 
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -10,7 +9,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.back.domain.problem.run.dto.RunRequest;
 import com.back.domain.problem.run.service.RunService;
-import com.back.global.security.SecurityUser;
+import com.back.global.rq.Rq;
 
 import lombok.RequiredArgsConstructor;
 
@@ -20,10 +19,10 @@ import lombok.RequiredArgsConstructor;
 public class RunController {
 
     private final RunService runService;
+    private final Rq rq;
 
     @PostMapping
-    public Map<String, String> run(
-            @RequestBody RunRequest request, @AuthenticationPrincipal SecurityUser securityUser) {
-        return runService.run(request, securityUser.getId());
+    public Map<String, String> run(@RequestBody RunRequest request) {
+        return runService.run(request, rq.getActor().getId());
     }
 }
