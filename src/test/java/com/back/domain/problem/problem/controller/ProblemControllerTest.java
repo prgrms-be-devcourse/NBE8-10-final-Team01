@@ -5,16 +5,37 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.List;
+
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import com.back.domain.problem.problem.dto.ProblemDetailResponse;
+import com.back.domain.problem.problem.dto.ProblemListResponse;
+import com.back.domain.problem.problem.dto.ProblemSummaryResponse;
 import com.back.domain.problem.problem.service.ProblemService;
 
 class ProblemControllerTest {
 
     private final ProblemService problemService = mock(ProblemService.class);
     private final ProblemController problemController = new ProblemController(problemService);
+
+    @Test
+    @DisplayName("문제 목록 조회 컨트롤러는 서비스 결과를 그대로 반환한다")
+    void getProblems_returnsServiceResult() {
+        // given
+        ProblemListResponse response = new ProblemListResponse(
+                List.of(new ProblemSummaryResponse(1L, "A + B", "EASY", 800, 1000L, 256L)),
+                new ProblemListResponse.PageInfo(0, 20, 1L, 1, false));
+        when(problemService.getProblems(0, 20)).thenReturn(response);
+
+        // when
+        ProblemListResponse actual = problemController.getProblems(0, 20);
+
+        // then
+        assertThat(actual).isEqualTo(response);
+        verify(problemService).getProblems(0, 20);
+    }
 
     @Test
     @DisplayName("문제 단건 조회 컨트롤러는 서비스 결과를 그대로 반환한다")
