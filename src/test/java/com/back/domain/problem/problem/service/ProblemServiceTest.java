@@ -2,15 +2,22 @@ package com.back.domain.problem.problem.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 
 import com.back.domain.problem.problem.dto.ProblemDetailResponse;
+import com.back.domain.problem.problem.dto.ProblemListResponse;
 import com.back.domain.problem.problem.entity.Problem;
 import com.back.domain.problem.problem.enums.DifficultyLevel;
 import com.back.domain.problem.problem.repository.ProblemRepository;
@@ -20,6 +27,58 @@ class ProblemServiceTest {
 
     private final ProblemRepository problemRepository = mock(ProblemRepository.class);
     private final ProblemService problemService = new ProblemService(problemRepository);
+
+    @Test
+    @DisplayName("문제 목록 조회 시 페이지 정보와 요약 목록을 반환한다")
+    void getProblems_returnsPagedSummary() {
+        // given
+        Problem problem = mock(Problem.class);
+        when(problem.getId()).thenReturn(1L);
+        when(problem.getTitle()).thenReturn("A + B");
+        when(problem.getDifficulty()).thenReturn(DifficultyLevel.EASY);
+        when(problem.getDifficultyRating()).thenReturn(800);
+        when(problem.getTimeLimitMs()).thenReturn(1000L);
+        when(problem.getMemoryLimitMb()).thenReturn(256L);
+
+        Pageable pageable = PageRequest.of(0, 20);
+        Page<Problem> page = new PageImpl<>(List.of(problem), pageable, 1);
+        when(problemRepository.findAll(any(Pageable.class))).thenReturn(page);
+
+        // when
+        ProblemListResponse response = problemService.getProblems(0, 20);
+
+        // then
+        assertThat(response.problems()).hasSize(1);
+        assertThat(response.problems().get(0).problemId()).isEqualTo(1L);
+        assertThat(response.problems().get(0).title()).isEqualTo("A + B");
+        assertThat(response.problems().get(0).difficulty()).isEqualTo("EASY");
+        assertThat(response.problems().get(0).difficultyRating()).isEqualTo(800);
+        assertThat(response.pageInfo().page()).isEqualTo(0);
+        assertThat(response.pageInfo().size()).isEqualTo(20);
+        assertThat(response.pageInfo().totalElements()).isEqualTo(1L);
+        assertThat(response.pageInfo().totalPages()).isEqualTo(1);
+        assertThat(response.pageInfo().hasNext()).isFalse();
+    }
+
+    @Test
+    @DisplayName("문제 목록 조회 시 page가 음수면 예외를 던진다")
+    void getProblems_throws_whenPageIsNegative() {
+        assertThatThrownBy(() -> problemService.getProblems(-1, 20))
+                .isInstanceOf(ServiceException.class)
+                .hasMessage("400-2 : page는 0 이상이어야 합니다.");
+    }
+
+    @Test
+    @DisplayName("문제 목록 조회 시 size가 1~100 범위를 벗어나면 예외를 던진다")
+    void getProblems_throws_whenSizeIsOutOfRange() {
+        assertThatThrownBy(() -> problemService.getProblems(0, 0))
+                .isInstanceOf(ServiceException.class)
+                .hasMessage("400-3 : size는 1 이상 100 이하여야 합니다.");
+
+        assertThatThrownBy(() -> problemService.getProblems(0, 101))
+                .isInstanceOf(ServiceException.class)
+                .hasMessage("400-3 : size는 1 이상 100 이하여야 합니다.");
+    }
 
     @Test
     @DisplayName("문제 ID로 단건 조회 시 프론트 전달용 상세 정보를 반환한다")
