@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.back.domain.problem.submission.dto.SubmissionResponse;
 import com.back.domain.problem.submission.dto.SubmitRequest;
 import com.back.domain.problem.submission.service.SubmissionService;
+import com.back.global.rq.Rq;
 
 import lombok.RequiredArgsConstructor;
 
@@ -19,10 +20,11 @@ import lombok.RequiredArgsConstructor;
 public class SubmissionController {
 
     private final SubmissionService submissionService;
+    private final Rq rq;
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public SubmissionResponse submit(@RequestBody SubmitRequest request) {
-        return submissionService.submit(request);
+        return submissionService.submit(request, rq.getActor().getId());
     }
 }
