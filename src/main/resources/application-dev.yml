@@ -14,3 +14,6 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         default_batch_fetch_size: 100
+
+judge0:
+  url: http://${JUDGE0_EC2_IP}:2358
