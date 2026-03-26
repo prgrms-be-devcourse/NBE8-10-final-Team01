@@ -35,7 +35,7 @@ public class SubmissionService {
     private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
-    public SubmissionResponse submit(SubmitRequest request) {
+    public SubmissionResponse submit(SubmitRequest request, Long memberId) {
 
         // 1. BattleRoom 조회 + PLAYING 상태 검증 + 타이머 만료 검증
         BattleRoom room = battleRoomRepository
@@ -51,9 +51,8 @@ public class SubmissionService {
         }
 
         // 2. Member 조회
-        Member member = memberRepository
-                .findById(request.memberId())
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 회원입니다."));
+        Member member =
+                memberRepository.findById(memberId).orElseThrow(() -> new IllegalArgumentException("존재하지 않는 회원입니다."));
 
         // 3. BattleParticipant 조회 + 제출 가능 상태(PLAYING) 검증
         BattleParticipant participant = battleParticipantRepository

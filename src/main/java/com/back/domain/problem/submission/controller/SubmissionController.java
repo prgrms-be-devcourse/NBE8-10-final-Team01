@@ -1,6 +1,7 @@
 package com.back.domain.problem.submission.controller;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -10,6 +11,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.back.domain.problem.submission.dto.SubmissionResponse;
 import com.back.domain.problem.submission.dto.SubmitRequest;
 import com.back.domain.problem.submission.service.SubmissionService;
+import com.back.global.security.SecurityUser;
 
 import lombok.RequiredArgsConstructor;
 
@@ -22,7 +24,8 @@ public class SubmissionController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public SubmissionResponse submit(@RequestBody SubmitRequest request) {
-        return submissionService.submit(request);
+    public SubmissionResponse submit(
+            @RequestBody SubmitRequest request, @AuthenticationPrincipal SecurityUser securityUser) {
+        return submissionService.submit(request, securityUser.getId());
     }
 }

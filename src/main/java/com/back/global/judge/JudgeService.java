@@ -77,6 +77,8 @@ public class JudgeService {
         } else { // 테스트 케이스가 1개 이상의 경우
             int languageId = getLanguageId(language);
 
+            // TODO: 함수형 코드 지원 시 driverCode 합치기
+            // String fullCode = code + "\n" + problem.getDriverCode().get(language);
             // 배치 요청 구성
             List<Judge0SubmitRequest> batchRequests = testCases.stream()
                     .map(tc -> new Judge0SubmitRequest(
