@@ -53,3 +53,4 @@ scripts/__pycache__/
 .claude
 myContext
 .gradle-user-home/
+.gradle-home/
