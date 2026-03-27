@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import java.util.List;
 import java.util.Map;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -23,12 +24,17 @@ import com.back.global.judge.event.RunRequestedEvent;
 
 class RunJudgeServiceTest {
 
-    private final Judge0Client judge0Client = mock(Judge0Client.class);
+    private final Judge0ExecutionService judge0ExecutionService = mock(Judge0ExecutionService.class);
     private final SimpMessagingTemplate messagingTemplate = mock(SimpMessagingTemplate.class);
 
-    private final RunJudgeService runJudgeService = new RunJudgeService(judge0Client, messagingTemplate);
+    private final RunJudgeService runJudgeService = new RunJudgeService(judge0ExecutionService, messagingTemplate);
 
     // ── 헬퍼 ──────────────────────────────────────────────────────────────────
+
+    @BeforeEach
+    void setUp() {
+        when(judge0ExecutionService.getLanguageId("python")).thenReturn(71);
+    }
 
     private TestCase mockTestCase(String input, String expectedOutput) {
         TestCase tc = mock(TestCase.class);
@@ -40,6 +46,10 @@ class RunJudgeServiceTest {
 
     private Judge0SubmitResponse response(int statusId, String stdout, String stderr, String compileOutput) {
         return new Judge0SubmitResponse("token", new Status(statusId, ""), stdout, stderr, compileOutput, null);
+    }
+
+    private void stubJudge0(Judge0SubmitResponse... responses) {
+        when(judge0ExecutionService.execute(any())).thenReturn(List.of(responses));
     }
 
     @SuppressWarnings("unchecked")
@@ -55,8 +65,7 @@ class RunJudgeServiceTest {
     @DisplayName("정답이면 status AC, actualOutput이 stdout으로 채워진다")
     void run_ac() {
         TestCase tc = mockTestCase("1 2", "3");
-        when(judge0Client.submitBatch(any())).thenReturn(List.of("token"));
-        when(judge0Client.getBatchResults(any())).thenReturn(List.of(response(3, "3\n", null, null)));
+        stubJudge0(response(3, "3\n", null, null));
 
         runJudgeService.onRunRequested(new RunRequestedEvent(1L, 1L, "print(3)", "python", List.of(tc)));
 
@@ -72,8 +81,7 @@ class RunJudgeServiceTest {
     @DisplayName("출력이 다르면 status WA")
     void run_wa() {
         TestCase tc = mockTestCase("1 2", "3");
-        when(judge0Client.submitBatch(any())).thenReturn(List.of("token"));
-        when(judge0Client.getBatchResults(any())).thenReturn(List.of(response(4, "5\n", null, null)));
+        stubJudge0(response(4, "5\n", null, null));
 
         runJudgeService.onRunRequested(new RunRequestedEvent(1L, 1L, "print(5)", "python", List.of(tc)));
 
@@ -86,9 +94,7 @@ class RunJudgeServiceTest {
     @DisplayName("컴파일 에러면 status CE, stderr에 compileOutput이 담긴다")
     void run_ce() {
         TestCase tc = mockTestCase("1 2", "3");
-        when(judge0Client.submitBatch(any())).thenReturn(List.of("token"));
-        when(judge0Client.getBatchResults(any()))
-                .thenReturn(List.of(response(6, null, null, "SyntaxError: invalid syntax")));
+        stubJudge0(response(6, null, null, "SyntaxError: invalid syntax"));
 
         runJudgeService.onRunRequested(new RunRequestedEvent(1L, 1L, "prnit(3)", "python", List.of(tc)));
 
@@ -101,8 +107,7 @@ class RunJudgeServiceTest {
     @DisplayName("시간 초과면 status TLE")
     void run_tle() {
         TestCase tc = mockTestCase("1 2", "3");
-        when(judge0Client.submitBatch(any())).thenReturn(List.of("token"));
-        when(judge0Client.getBatchResults(any())).thenReturn(List.of(response(5, null, null, null)));
+        stubJudge0(response(5, null, null, null));
 
         runJudgeService.onRunRequested(new RunRequestedEvent(1L, 1L, "while True: pass", "python", List.of(tc)));
 
@@ -114,8 +119,7 @@ class RunJudgeServiceTest {
     @DisplayName("런타임 에러면 status RE, stderr가 채워진다")
     void run_re() {
         TestCase tc = mockTestCase("1 2", "3");
-        when(judge0Client.submitBatch(any())).thenReturn(List.of("token"));
-        when(judge0Client.getBatchResults(any())).thenReturn(List.of(response(11, null, "ZeroDivisionError", null)));
+        stubJudge0(response(11, null, "ZeroDivisionError", null));
 
         runJudgeService.onRunRequested(new RunRequestedEvent(1L, 1L, "print(1/0)", "python", List.of(tc)));
 
@@ -129,9 +133,7 @@ class RunJudgeServiceTest {
     void run_mixed_results() {
         TestCase tc1 = mockTestCase("1 2", "3");
         TestCase tc2 = mockTestCase("5 7", "12");
-        when(judge0Client.submitBatch(any())).thenReturn(List.of("token1", "token2"));
-        when(judge0Client.getBatchResults(any()))
-                .thenReturn(List.of(response(3, "3\n", null, null), response(4, "13\n", null, null)));
+        stubJudge0(response(3, "3\n", null, null), response(4, "13\n", null, null));
 
         runJudgeService.onRunRequested(new RunRequestedEvent(1L, 1L, "code", "python", List.of(tc1, tc2)));
 
@@ -154,13 +156,10 @@ class RunJudgeServiceTest {
     }
 
     @Test
-    @DisplayName("Judge0 폴링 타임아웃 시 전체 케이스를 RE로 반환한다")
+    @DisplayName("Judge0 타임아웃 시 전체 케이스를 RE로 반환한다")
     void run_judge0Timeout() {
         TestCase tc = mockTestCase("1 2", "3");
-        when(judge0Client.submitBatch(any())).thenReturn(List.of("token"));
-        // 계속 미완료 상태 반환 → 타임아웃
-        when(judge0Client.getBatchResults(any()))
-                .thenReturn(List.of(response(1, null, null, null))); // status 1 = In Queue (미완료)
+        when(judge0ExecutionService.execute(any())).thenReturn(List.of()); // 타임아웃 → 빈 리스트
 
         runJudgeService.onRunRequested(new RunRequestedEvent(1L, 1L, "code", "python", List.of(tc)));
 
@@ -174,8 +173,7 @@ class RunJudgeServiceTest {
     @DisplayName("결과는 /topic/room/{roomId}/run 토픽으로 전송된다")
     void run_sendsToCorrectTopic() {
         TestCase tc = mockTestCase("1 2", "3");
-        when(judge0Client.submitBatch(any())).thenReturn(List.of("token"));
-        when(judge0Client.getBatchResults(any())).thenReturn(List.of(response(3, "3\n", null, null)));
+        stubJudge0(response(3, "3\n", null, null));
 
         runJudgeService.onRunRequested(new RunRequestedEvent(42L, 1L, "code", "python", List.of(tc)));
 
@@ -186,8 +184,7 @@ class RunJudgeServiceTest {
     @DisplayName("WebSocket 메시지 type은 RUN_RESULT, userId가 포함된다")
     void run_messageContainsTypeAndUserId() {
         TestCase tc = mockTestCase("1 2", "3");
-        when(judge0Client.submitBatch(any())).thenReturn(List.of("token"));
-        when(judge0Client.getBatchResults(any())).thenReturn(List.of(response(3, "3\n", null, null)));
+        stubJudge0(response(3, "3\n", null, null));
 
         runJudgeService.onRunRequested(new RunRequestedEvent(1L, 99L, "code", "python", List.of(tc)));
 

@@ -36,7 +36,7 @@ import com.back.global.judge.event.JudgeRequestedEvent;
 
 class JudgeServiceTest {
 
-    private final Judge0Client judge0Client = mock(Judge0Client.class);
+    private final Judge0ExecutionService judge0ExecutionService = mock(Judge0ExecutionService.class);
     private final SubmissionRepository submissionRepository = mock(SubmissionRepository.class);
     private final BattleParticipantRepository battleParticipantRepository = mock(BattleParticipantRepository.class);
     private final BattleRoomRepository battleRoomRepository = mock(BattleRoomRepository.class);
@@ -45,7 +45,7 @@ class JudgeServiceTest {
     private final SimpMessagingTemplate messagingTemplate = mock(SimpMessagingTemplate.class);
 
     private final JudgeService judgeService = new JudgeService(
-            judge0Client,
+            judge0ExecutionService,
             submissionRepository,
             battleParticipantRepository,
             battleRoomRepository,
@@ -72,6 +72,7 @@ class JudgeServiceTest {
         participant = mock(BattleParticipant.class);
 
         when(submissionRepository.findById(SUBMISSION_ID)).thenReturn(Optional.of(submission));
+        when(judge0ExecutionService.getLanguageId("python")).thenReturn(71);
     }
 
     private TestCase mockTestCase(String input, String expectedOutput) {
@@ -86,8 +87,7 @@ class JudgeServiceTest {
     }
 
     private void stubJudge0(Judge0SubmitResponse... responses) {
-        when(judge0Client.submitBatch(any())).thenReturn(List.of("token"));
-        when(judge0Client.getBatchResults(any())).thenReturn(List.of(responses));
+        when(judge0ExecutionService.execute(any())).thenReturn(List.of(responses));
     }
 
     /** AC 흐름에서 필요한 handleAc() 관련 Mock 설정 */
@@ -182,11 +182,10 @@ class JudgeServiceTest {
     }
 
     @Test
-    @DisplayName("Judge0 폴링 타임아웃 시 submission result가 RE로 저장된다")
+    @DisplayName("Judge0 타임아웃 시 submission result가 RE로 저장된다")
     void judge_judge0Timeout_savedAsRe() {
         TestCase tc = mockTestCase("1 2", "3");
-        when(judge0Client.submitBatch(any())).thenReturn(List.of("token"));
-        when(judge0Client.getBatchResults(any())).thenReturn(List.of(response(1, null))); // 미완료 상태
+        when(judge0ExecutionService.execute(any())).thenReturn(List.of()); // 타임아웃 → 빈 리스트
 
         judgeService.onJudgeRequested(event(List.of(tc)));
 
@@ -250,7 +249,7 @@ class JudgeServiceTest {
         BattleParticipant p1 = mock(BattleParticipant.class);
         BattleParticipant p2 = mock(BattleParticipant.class);
         when(p1.getStatus()).thenReturn(BattleParticipantStatus.EXIT);
-        when(p2.getStatus()).thenReturn(BattleParticipantStatus.PLAYING); // 아직 풀이 중
+        when(p2.getStatus()).thenReturn(BattleParticipantStatus.PLAYING);
         stubHandleAc(List.of(p1, p2));
 
         judgeService.onJudgeRequested(event(List.of(tc)));

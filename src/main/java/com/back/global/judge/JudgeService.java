@@ -34,10 +34,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class JudgeService {
 
-    private static final int MAX_POLL_ATTEMPTS = 10;
-    private static final int POLL_INTERVAL_MS = 1000;
-
-    private final Judge0Client judge0Client;
+    private final Judge0ExecutionService judge0ExecutionService;
     private final SubmissionRepository submissionRepository;
     private final BattleParticipantRepository battleParticipantRepository;
     private final BattleRoomRepository battleRoomRepository;
@@ -75,17 +72,15 @@ public class JudgeService {
             log.warn("Submission {} has no test cases, marking as WA", submissionId);
             judgeResult = SubmissionResult.WA;
         } else { // 테스트 케이스가 1개 이상의 경우
-            int languageId = getLanguageId(language);
+            int languageId = judge0ExecutionService.getLanguageId(language);
 
             // TODO: 함수형 코드 지원 시 driverCode 합치기
             // String fullCode = code + "\n" + problem.getDriverCode().get(language);
-            // 배치 요청 구성
             List<Judge0SubmitRequest> batchRequests = testCases.stream()
                     .map(tc -> new Judge0SubmitRequest(
                             code, languageId, tc.getInput() != null ? tc.getInput() : "", tc.getExpectedOutput()))
                     .toList();
-            // judge 실행 (10초간 1초마다 풀링)
-            List<Judge0SubmitResponse> results = runJudge(batchRequests);
+            List<Judge0SubmitResponse> results = judge0ExecutionService.execute(batchRequests);
             results.forEach(r -> log.info(
                     "Judge0 result: token={}, statusId={}, stderr={}, compileOutput={}, message={}",
                     r.token(),
@@ -173,38 +168,6 @@ public class JudgeService {
     }
 
     /**
-     * 폴링 부분 (Judge0 worker가 코드를 실행 완료할 때까지 1초 간격으로 계속 물어보는 것)
-     *   submitBatch() → 토큰 발급 ["abc", "def"]
-     *        │
-     *        ▼
-     *   1초 후 getBatchResults() → status_id 1 (처리 중) → 다시 대기
-     *   1초 후 getBatchResults() → status_id 1 (처리 중) → 다시 대기
-     *   1초 후 getBatchResults() → status_id 3 (완료!) → 결과 반환
-     */
-    private List<Judge0SubmitResponse> runJudge(List<Judge0SubmitRequest> batchRequests) {
-        try {
-            List<String> tokens = judge0Client.submitBatch(batchRequests); // 제출 → 토큰 받기
-            for (int i = 0; i < MAX_POLL_ATTEMPTS; i++) { // 최대 10회
-                List<Judge0SubmitResponse> results = judge0Client.getBatchResults(tokens); // 결과 조회
-                if (results.stream().allMatch(Judge0SubmitResponse::isCompleted)) {
-                    return results; // 모두 완료했으면 반환
-                }
-                Thread.sleep(POLL_INTERVAL_MS); // 아직 처리중이면 1초 대기
-            }
-            // 10초 지나도 안 끝나면 타임아웃
-            log.warn("Judge0 polling timed out after {} attempts", MAX_POLL_ATTEMPTS);
-            return List.of();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            log.error("Judge0 polling interrupted", e);
-            return List.of();
-        } catch (Exception e) {
-            log.error("Judge0 judging failed", e);
-            return List.of();
-        }
-    }
-
-    /**
      * 우선순위: CE > RE > TLE > WA > AC
      */
     private SubmissionResult aggregateResult(List<Judge0SubmitResponse> results, int totalCount) {
@@ -225,16 +188,5 @@ public class JudgeService {
         if (passed == totalCount) return SubmissionResult.AC;
 
         return SubmissionResult.WA;
-    }
-
-    private int getLanguageId(String language) {
-        return switch (language.toLowerCase()) {
-            case "python", "python3" -> 71;
-            case "java" -> 62;
-            case "cpp", "c++" -> 54;
-            case "c" -> 50;
-            case "javascript", "js" -> 63;
-            default -> throw new IllegalArgumentException("지원하지 않는 언어: " + language);
-        };
     }
 }
