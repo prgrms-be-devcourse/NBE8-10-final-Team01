@@ -10,6 +10,7 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
 @EnableWebSocketMessageBroker
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
+    // TODO: STOMP ChannelInterceptor 추가하여 CONNECT 시점에 JWT 토큰 검증 필요 (현재 인증 없이 WebSocket 연결 가능)
     @Override
     public void configureMessageBroker(MessageBrokerRegistry registry) {
         // 서버 → 클라이언트 구독 prefix
