@@ -182,14 +182,14 @@ class JudgeServiceTest {
     }
 
     @Test
-    @DisplayName("Judge0 타임아웃 시 submission result가 RE로 저장된다")
-    void judge_judge0Timeout_savedAsRe() {
+    @DisplayName("Judge0 타임아웃 시 submission result가 JUDGE_ERROR로 저장된다")
+    void judge_judge0Timeout_savedAsJudgeError() {
         TestCase tc = mockTestCase("1 2", "3");
         when(judge0ExecutionService.execute(any())).thenReturn(List.of()); // 타임아웃 → 빈 리스트
 
         judgeService.onJudgeRequested(event(List.of(tc)));
 
-        assertThat(submission.getResult()).isEqualTo(SubmissionResult.RE);
+        assertThat(submission.getResult()).isEqualTo(SubmissionResult.JUDGE_ERROR);
         verify(submissionRepository).save(submission);
     }
 

@@ -156,7 +156,7 @@ class RunJudgeServiceTest {
     }
 
     @Test
-    @DisplayName("Judge0 타임아웃 시 전체 케이스를 RE로 반환한다")
+    @DisplayName("Judge0 타임아웃 시 전체 케이스를 JUDGE_ERROR로 반환한다")
     void run_judge0Timeout() {
         TestCase tc = mockTestCase("1 2", "3");
         when(judge0ExecutionService.execute(any())).thenReturn(List.of()); // 타임아웃 → 빈 리스트
@@ -164,7 +164,8 @@ class RunJudgeServiceTest {
         runJudgeService.onRunRequested(new RunRequestedEvent(1L, 1L, "code", "python", List.of(tc)));
 
         List<RunTestCaseResult> results = captureResults();
-        assertThat(results.get(0).status()).isEqualTo("RE");
+        assertThat(results.get(0).status()).isEqualTo("JUDGE_ERROR");
+        assertThat(results.get(0).stderr()).isEqualTo("채점 서버 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
     }
 
     // ── WebSocket 전송 검증 ───────────────────────────────────────────────────
