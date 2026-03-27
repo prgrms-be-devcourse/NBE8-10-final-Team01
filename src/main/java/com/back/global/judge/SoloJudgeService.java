@@ -81,7 +81,7 @@ public class SoloJudgeService {
      * 우선순위: CE > RE > TLE > WA > AC
      */
     private SubmissionResult aggregateResult(List<Judge0SubmitResponse> results, int totalCount) {
-        if (results.isEmpty()) return SubmissionResult.RE;
+        if (results.isEmpty()) return SubmissionResult.JUDGE_ERROR;
 
         if (results.stream().anyMatch(r -> r.status() != null && r.status().id() == 6)) {
             return SubmissionResult.CE;

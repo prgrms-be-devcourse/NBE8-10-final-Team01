@@ -71,8 +71,12 @@ public class RunJudgeService {
 
         if (judgeResponses.isEmpty()) {
             return testCases.stream()
-                    .map(tc ->
-                            new RunTestCaseResult(tc.getInput(), tc.getExpectedOutput(), null, "RE", "실행 시간이 초과되었습니다."))
+                    .map(tc -> new RunTestCaseResult(
+                            tc.getInput(),
+                            tc.getExpectedOutput(),
+                            null,
+                            "JUDGE_ERROR",
+                            "채점 서버 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."))
                     .toList();
         }
 

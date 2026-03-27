@@ -24,6 +24,8 @@ public class Judge0ExecutionService {
      * Judge0에 배치 제출 후 폴링하여 결과 반환.
      * 타임아웃(10초) 또는 오류 시 빈 리스트 반환.
      */
+    // TODO: 채점 폴링 10초 실패해서 빈 리스트를 반환하게되어서 WA로 된다면
+    // 그건 나중에 점수 결산에서 빼야하는것 아닌가? (WA에서20초 추가되는거)
     public List<Judge0SubmitResponse> execute(List<Judge0SubmitRequest> batchRequests) {
         try {
             List<String> tokens = judge0Client.submitBatch(batchRequests);
