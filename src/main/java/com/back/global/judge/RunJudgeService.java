@@ -23,19 +23,22 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class RunJudgeService {
 
-    private static final int MAX_POLL_ATTEMPTS = 10;
-    private static final int POLL_INTERVAL_MS = 1000;
-
-    private final Judge0Client judge0Client;
+    private final Judge0ExecutionService judge0ExecutionService;
     private final SimpMessagingTemplate messagingTemplate;
 
     @Async
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onRunRequested(RunRequestedEvent event) {
-        run(event.roomId(), event.memberId(), event.code(), event.language(), event.testCases());
+        run(
+                event.roomId(),
+                event.memberId(),
+                event.code(),
+                event.language(),
+                event.testCases(),
+                "/topic/room/" + event.roomId() + "/run");
     }
 
-    private void run(Long roomId, Long memberId, String code, String language, List<TestCase> testCases) {
+    void run(Long roomId, Long memberId, String code, String language, List<TestCase> testCases, String topic) {
 
         List<RunTestCaseResult> results;
 
@@ -43,7 +46,7 @@ public class RunJudgeService {
             log.warn("Run request for room {} has no sample test cases", roomId);
             results = List.of();
         } else {
-            int languageId = getLanguageId(language);
+            int languageId = judge0ExecutionService.getLanguageId(language);
 
             // TODO: 함수형 코드 지원 시 driverCode 합치기
             // String fullCode = code + "\n" + problem.getDriverCode().get(language);
@@ -52,27 +55,28 @@ public class RunJudgeService {
                             code, languageId, tc.getInput() != null ? tc.getInput() : "", tc.getExpectedOutput()))
                     .toList();
 
-            List<Judge0SubmitResponse> judgeResponses = runJudge(batchRequests);
-
+            List<Judge0SubmitResponse> judgeResponses = judge0ExecutionService.execute(batchRequests);
             results = buildResults(testCases, judgeResponses);
         }
 
-        // WebSocket: 케이스별 실행 결과 push
         messagingTemplate.convertAndSend(
-                "/topic/room/" + roomId + "/run",
+                topic,
                 Map.of(
                         "type", "RUN_RESULT",
                         "userId", memberId,
                         "results", results));
     }
 
-    private List<RunTestCaseResult> buildResults(List<TestCase> testCases, List<Judge0SubmitResponse> judgeResponses) {
+    public List<RunTestCaseResult> buildResults(List<TestCase> testCases, List<Judge0SubmitResponse> judgeResponses) {
 
-        // 폴링 타임아웃 등으로 결과가 없을 경우 전체 RE 처리
         if (judgeResponses.isEmpty()) {
             return testCases.stream()
-                    .map(tc ->
-                            new RunTestCaseResult(tc.getInput(), tc.getExpectedOutput(), null, "RE", "실행 시간이 초과되었습니다."))
+                    .map(tc -> new RunTestCaseResult(
+                            tc.getInput(),
+                            tc.getExpectedOutput(),
+                            null,
+                            "JUDGE_ERROR",
+                            "채점 서버 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."))
                     .toList();
         }
 
@@ -91,7 +95,7 @@ public class RunJudgeService {
                 .toList();
     }
 
-    private String resolveStatus(Judge0SubmitResponse r) {
+    public String resolveStatus(Judge0SubmitResponse r) {
         if (r.status() == null) return "RE";
         return switch (r.status().id()) {
             case 3 -> "AC";
@@ -99,39 +103,6 @@ public class RunJudgeService {
             case 5 -> "TLE";
             case 6 -> "CE";
             default -> "RE";
-        };
-    }
-
-    private List<Judge0SubmitResponse> runJudge(List<Judge0SubmitRequest> batchRequests) {
-        try {
-            List<String> tokens = judge0Client.submitBatch(batchRequests);
-            for (int i = 0; i < MAX_POLL_ATTEMPTS; i++) {
-                List<Judge0SubmitResponse> results = judge0Client.getBatchResults(tokens);
-                if (results.stream().allMatch(Judge0SubmitResponse::isCompleted)) {
-                    return results;
-                }
-                Thread.sleep(POLL_INTERVAL_MS);
-            }
-            log.warn("Judge0 run polling timed out after {} attempts", MAX_POLL_ATTEMPTS);
-            return List.of();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            log.error("Judge0 run polling interrupted", e);
-            return List.of();
-        } catch (Exception e) {
-            log.error("Judge0 run failed", e);
-            return List.of();
-        }
-    }
-
-    private int getLanguageId(String language) {
-        return switch (language.toLowerCase()) {
-            case "python", "python3" -> 71;
-            case "java" -> 62;
-            case "cpp", "c++" -> 54;
-            case "c" -> 50;
-            case "javascript", "js" -> 63;
-            default -> throw new IllegalArgumentException("지원하지 않는 언어: " + language);
         };
     }
 }

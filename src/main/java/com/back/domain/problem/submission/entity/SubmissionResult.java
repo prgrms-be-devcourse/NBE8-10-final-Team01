@@ -6,5 +6,6 @@ public enum SubmissionResult {
     TLE, // Time Limit Exceeded
     MLE, // Memory Limit Exceeded
     RE, // Runtime Error
-    CE // Compile Error
+    CE, // Compile Error
+    JUDGE_ERROR // Judge0 서버 오류 (타임아웃, 연결 실패 등)
 }
