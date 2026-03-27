@@ -26,7 +26,9 @@ import com.back.domain.problem.problem.entity.Problem;
 import com.back.domain.problem.problem.repository.ProblemRepository;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class BattleRoomService {
@@ -67,9 +69,10 @@ public class BattleRoomService {
     @Transactional
     public JoinRoomResponse joinRoom(Long roomId, Long memberId) {
 
-        // 1. BattleRoom 조회 + WAITING 상태 검증
-        BattleRoom room =
-                battleRoomRepository.findById(roomId).orElseThrow(() -> new IllegalArgumentException("존재하지 않는 방입니다."));
+        // 1. BattleRoom 조회 + WAITING 상태 검증 (비관적 락으로 동시 joinRoom 직렬화)
+        BattleRoom room = battleRoomRepository
+                .findByIdWithLock(roomId)
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 방입니다."));
 
         if (room.getStatus() != BattleRoomStatus.WAITING) {
             throw new IllegalStateException("입장할 수 없는 상태의 방입니다. 현재 상태: " + room.getStatus());
@@ -86,6 +89,7 @@ public class BattleRoomService {
 
         // 4. READY → PLAYING 상태 바꾸기
         participant.join();
+        battleParticipantRepository.save(participant);
 
         // 5. 모든 참여자가 PLAYING이면 배틀 시작
         List<BattleParticipant> allParticipants = battleParticipantRepository.findByBattleRoom(room);
@@ -93,12 +97,20 @@ public class BattleRoomService {
 
         if (allPlaying) {
             room.startBattle(Duration.ofMinutes(30));
+            battleRoomRepository.save(room);
             String timerEnd = room.getTimerEnd().toString();
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    messagingTemplate.convertAndSend(
-                            "/topic/room/" + roomId, Map.of("type", "BATTLE_STARTED", "timerEnd", timerEnd));
+                    // 커밋 후이므로 예외를 전파해도 트랜잭션 롤백이 불가능하고,
+                    // 클라이언트에게 500이 반환되어 DB는 성공했는데 실패로 인식하는 혼란을 유발함.
+                    // WebSocket은 실시간 알림 역할이므로 전송 실패가 치명적이지 않아 예외를 삼키고 로그만 남김.
+                    try {
+                        messagingTemplate.convertAndSend(
+                                "/topic/room/" + roomId, Map.of("type", "BATTLE_STARTED", "timerEnd", timerEnd));
+                    } catch (Exception e) {
+                        log.error("BATTLE_STARTED WebSocket 전송 실패 roomId={}", roomId, e);
+                    }
                 }
             });
         }

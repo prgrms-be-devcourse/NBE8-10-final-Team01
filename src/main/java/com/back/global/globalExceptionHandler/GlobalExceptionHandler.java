@@ -3,6 +3,7 @@ package com.back.global.globalExceptionHandler;
 import java.util.NoSuchElementException;
 import java.util.stream.Collectors;
 
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -77,5 +78,12 @@ public class GlobalExceptionHandler {
     public ResponseEntity<RsData<Void>> handle(ServiceException ex) {
         RsData<Void> rsData = ex.getRsData();
         return ResponseEntity.status(rsData.statusCode()).body(rsData);
+    }
+
+    // 7. 비관적 락 타임아웃 (joinRoom 동시 요청 과부하 시)
+    //    락 대기 1초 초과 시 발생. 500 대신 409로 명확한 의미 전달.
+    @ExceptionHandler(PessimisticLockingFailureException.class)
+    public ResponseEntity<RsData<Void>> handle(PessimisticLockingFailureException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(RsData.of("409-1", "현재 입장 처리 중입니다. 잠시 후 다시 시도해 주세요."));
     }
 }

@@ -13,6 +13,8 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.back.domain.battle.battleparticipant.entity.BattleParticipant;
 import com.back.domain.battle.battleparticipant.entity.BattleParticipantStatus;
@@ -96,11 +98,20 @@ public class BattleResultService {
         // 6. BattleRoom 종료
         room.finish();
 
-        // 7. WebSocket 브로드캐스트
-        // TODO: 리팩토링 - 트랜잭션 커밋 전 메시지 전송 문제
-        //   현재 @Transactional 안에서 convertAndSend 호출 시 커밋 전에 메시지가 전송됨
-        //   → TransactionSynchronizationManager.registerSynchronization의 afterCommit()으로 개선 필요
-        messagingTemplate.convertAndSend("/topic/room/" + roomId, Map.of("type", "BATTLE_FINISHED"));
+        // 7. WebSocket 브로드캐스트 — 커밋 후 전송으로 프론트가 확정된 DB 상태를 읽도록 보장
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                // 커밋 후이므로 예외를 전파해도 트랜잭션 롤백이 불가능하고,
+                // 클라이언트에게 500이 반환되어 DB는 성공했는데 실패로 인식하는 혼란을 유발함.
+                // WebSocket은 실시간 알림 역할이므로 전송 실패가 치명적이지 않아 예외를 삼키고 로그만 남김.
+                try {
+                    messagingTemplate.convertAndSend("/topic/room/" + roomId, Map.of("type", "BATTLE_FINISHED"));
+                } catch (Exception e) {
+                    log.error("BATTLE_FINISHED WebSocket 전송 실패 roomId={}", roomId, e);
+                }
+            }
+        });
     }
 
     @Transactional(readOnly = true)
