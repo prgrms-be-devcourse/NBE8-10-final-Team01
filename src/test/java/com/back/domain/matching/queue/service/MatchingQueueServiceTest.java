@@ -19,18 +19,23 @@ import com.back.domain.battle.battleroom.dto.CreateRoomRequest;
 import com.back.domain.battle.battleroom.dto.CreateRoomResponse;
 import com.back.domain.battle.battleroom.service.BattleRoomService;
 import com.back.domain.matching.queue.adapter.QueueProblemPicker;
+import com.back.domain.matching.queue.dto.MatchStateResponse;
 import com.back.domain.matching.queue.dto.QueueJoinRequest;
 import com.back.domain.matching.queue.dto.QueueStateResponse;
 import com.back.domain.matching.queue.dto.QueueStatusResponse;
 import com.back.domain.matching.queue.model.Difficulty;
 import com.back.domain.matching.queue.model.QueueKey;
+import com.back.domain.matching.queue.store.InMemoryMatchStateStore;
+import com.back.domain.matching.queue.store.MatchStateStore;
 
 class MatchingQueueServiceTest {
 
     private final BattleRoomService battleRoomService = mock(BattleRoomService.class);
     private final QueueProblemPicker queueProblemPicker = mock(QueueProblemPicker.class);
+    private final MatchStateStore matchStateStore = new InMemoryMatchStateStore();
+
     private final MatchingQueueService matchingQueueService =
-            new MatchingQueueService(battleRoomService, queueProblemPicker);
+            new MatchingQueueService(battleRoomService, queueProblemPicker, matchStateStore);
 
     @BeforeEach
     void setUp() {
@@ -82,7 +87,7 @@ class MatchingQueueServiceTest {
         QueueStatusResponse response = matchingQueueService.cancelQueue(userId);
 
         // then
-        assertThat(response.getMessage()).isEqualTo("매칭 대기열에서 취소되었습니다.");
+        assertThat(response.getMessage()).isEqualTo("매칭 대기열에서 취소했습니다.");
         assertThat(response.getCategory()).isEqualTo("ARRAY");
         assertThat(response.getDifficulty()).isEqualTo("EASY");
         assertThat(response.getWaitingCount()).isEqualTo(0);
@@ -285,5 +290,99 @@ class MatchingQueueServiceTest {
         assertThat(response.category()).isNull();
         assertThat(response.difficulty()).isNull();
         assertThat(response.waitingCount()).isEqualTo(0);
+    }
+
+    @Test
+    @DisplayName("큐에 있는 사용자는 matches/me 조회 시 SEARCHING 상태를 반환한다")
+    void getMyMatchState_returnsSearching_whenUserInQueue() {
+        // given
+        Long userId = 1L;
+        matchingQueueService.joinQueue(userId, createRequest("Array", Difficulty.EASY));
+
+        // when
+        MatchStateResponse response = matchingQueueService.getMyMatchState(userId);
+
+        // then
+        assertThat(response.status()).isEqualTo("SEARCHING");
+        assertThat(response.roomId()).isNull();
+    }
+
+    @Test
+    @DisplayName("4명 매칭이 완료되면 매칭된 4명 모두 MATCHED와 같은 roomId를 반환한다")
+    void getMyMatchState_returnsMatched_whenRoomCreated() {
+        // given
+        when(battleRoomService.createRoom(any(CreateRoomRequest.class)))
+                .thenReturn(new CreateRoomResponse(100L, "WAITING"));
+
+        matchingQueueService.joinQueue(1L, createRequest("Array", Difficulty.EASY));
+        matchingQueueService.joinQueue(2L, createRequest("Array", Difficulty.EASY));
+        matchingQueueService.joinQueue(3L, createRequest("Array", Difficulty.EASY));
+        matchingQueueService.joinQueue(4L, createRequest("Array", Difficulty.EASY));
+
+        // when
+        MatchStateResponse response1 = matchingQueueService.getMyMatchState(1L);
+        MatchStateResponse response2 = matchingQueueService.getMyMatchState(2L);
+        MatchStateResponse response3 = matchingQueueService.getMyMatchState(3L);
+        MatchStateResponse response4 = matchingQueueService.getMyMatchState(4L);
+
+        // then
+        assertThat(response1.status()).isEqualTo("MATCHED");
+        assertThat(response2.status()).isEqualTo("MATCHED");
+        assertThat(response3.status()).isEqualTo("MATCHED");
+        assertThat(response4.status()).isEqualTo("MATCHED");
+
+        assertThat(response1.roomId()).isEqualTo(100L);
+        assertThat(response2.roomId()).isEqualTo(100L);
+        assertThat(response3.roomId()).isEqualTo(100L);
+        assertThat(response4.roomId()).isEqualTo(100L);
+    }
+
+    @Test
+    @DisplayName("clearMatchedRoom은 입장 완료한 사용자만 IDLE로 바꾸고 나머지는 MATCHED를 유지한다")
+    void clearMatchedRoom_removesOnlyTargetUser() {
+        // given
+        when(battleRoomService.createRoom(any(CreateRoomRequest.class)))
+                .thenReturn(new CreateRoomResponse(100L, "WAITING"));
+
+        matchingQueueService.joinQueue(1L, createRequest("Array", Difficulty.EASY));
+        matchingQueueService.joinQueue(2L, createRequest("Array", Difficulty.EASY));
+        matchingQueueService.joinQueue(3L, createRequest("Array", Difficulty.EASY));
+        matchingQueueService.joinQueue(4L, createRequest("Array", Difficulty.EASY));
+
+        // when
+        matchingQueueService.clearMatchedRoom(4L, 100L);
+
+        // then
+        assertThat(matchingQueueService.getMyMatchState(4L).status()).isEqualTo("IDLE");
+        assertThat(matchingQueueService.getMyMatchState(4L).roomId()).isNull();
+
+        assertThat(matchingQueueService.getMyMatchState(1L).status()).isEqualTo("MATCHED");
+        assertThat(matchingQueueService.getMyMatchState(2L).status()).isEqualTo("MATCHED");
+        assertThat(matchingQueueService.getMyMatchState(3L).status()).isEqualTo("MATCHED");
+
+        assertThat(matchingQueueService.getMyMatchState(1L).roomId()).isEqualTo(100L);
+        assertThat(matchingQueueService.getMyMatchState(2L).roomId()).isEqualTo(100L);
+        assertThat(matchingQueueService.getMyMatchState(3L).roomId()).isEqualTo(100L);
+    }
+
+    @Test
+    @DisplayName("clearMatchedRoom은 roomId가 다르면 매칭 상태를 지우지 않는다")
+    void clearMatchedRoom_doesNothing_whenRoomIdDoesNotMatch() {
+        // given
+        when(battleRoomService.createRoom(any(CreateRoomRequest.class)))
+                .thenReturn(new CreateRoomResponse(100L, "WAITING"));
+
+        matchingQueueService.joinQueue(1L, createRequest("Array", Difficulty.EASY));
+        matchingQueueService.joinQueue(2L, createRequest("Array", Difficulty.EASY));
+        matchingQueueService.joinQueue(3L, createRequest("Array", Difficulty.EASY));
+        matchingQueueService.joinQueue(4L, createRequest("Array", Difficulty.EASY));
+
+        // when
+        matchingQueueService.clearMatchedRoom(1L, 999L);
+
+        // then
+        MatchStateResponse response = matchingQueueService.getMyMatchState(1L);
+        assertThat(response.status()).isEqualTo("MATCHED");
+        assertThat(response.roomId()).isEqualTo(100L);
     }
 }
