@@ -36,6 +36,7 @@ public class SecurityConfig {
                                 "/api/v1/members/login",
                                 // 로그아웃은 인증 없이도 호출 가능해야 함
                                 "/api/v1/members/logout",
+                                // TODO: WebSocket 핸드셰이크는 permitAll 필요하나, STOMP ChannelInterceptor로 인증 강제 필요
                                 "/ws/**")
                         .permitAll()
                         // 그 외 모든 요청은 인증 필요
