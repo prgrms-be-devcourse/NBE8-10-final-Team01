@@ -35,7 +35,8 @@ public class SecurityConfig {
                                 "/api/v1/members/join",
                                 "/api/v1/members/login",
                                 // 로그아웃은 인증 없이도 호출 가능해야 함
-                                "/api/v1/members/logout")
+                                "/api/v1/members/logout",
+                                "/ws/**")
                         .permitAll()
                         // 그 외 모든 요청은 인증 필요
                         .anyRequest()
