@@ -100,7 +100,7 @@ public class MatchingQueueService {
             CreateRoomResponse response =
                     battleRoomService.createRoom(new CreateRoomRequest(problemId, participantIds, 4));
 
-            // EARCHING -> MATCHED 전환도 store가 담당
+            // SEARCHING -> MATCHED 전환도 store가 담당
             matchStateStore.markMatched(queueKey, matchedUsers, response.roomId());
 
             return response;

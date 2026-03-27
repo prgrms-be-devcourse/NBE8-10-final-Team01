@@ -190,6 +190,10 @@ class MatchingQueueServiceTest {
         // 원복 확인: 1번 사용자를 취소하면 4명 중 1명만 빠져 3명이 남아야 한다.
         QueueStatusResponse cancelResponse = matchingQueueService.cancelQueue(1L);
         assertThat(cancelResponse.getWaitingCount()).isEqualTo(3);
+
+        // 매칭 세션이 만들어지지 않았으므로 여전히 SEARCHING 상태여야 한다.
+        assertThat(matchingQueueService.getMyMatchState(2L).status()).isEqualTo("SEARCHING");
+        assertThat(matchingQueueService.getMyMatchState(2L).roomId()).isNull();
     }
 
     @Test
@@ -384,5 +388,30 @@ class MatchingQueueServiceTest {
         MatchStateResponse response = matchingQueueService.getMyMatchState(1L);
         assertThat(response.status()).isEqualTo("MATCHED");
         assertThat(response.roomId()).isEqualTo(100L);
+    }
+
+    @Test
+    @DisplayName("매칭된 모든 사용자가 roomId를 소비하면 전원 IDLE 상태가 된다")
+    void clearMatchedRoom_returnsAllUsersToIdle_whenAllUsersEnter() {
+        // given
+        when(battleRoomService.createRoom(any(CreateRoomRequest.class)))
+                .thenReturn(new CreateRoomResponse(100L, "WAITING"));
+
+        matchingQueueService.joinQueue(1L, createRequest("Array", Difficulty.EASY));
+        matchingQueueService.joinQueue(2L, createRequest("Array", Difficulty.EASY));
+        matchingQueueService.joinQueue(3L, createRequest("Array", Difficulty.EASY));
+        matchingQueueService.joinQueue(4L, createRequest("Array", Difficulty.EASY));
+
+        // when
+        matchingQueueService.clearMatchedRoom(1L, 100L);
+        matchingQueueService.clearMatchedRoom(2L, 100L);
+        matchingQueueService.clearMatchedRoom(3L, 100L);
+        matchingQueueService.clearMatchedRoom(4L, 100L);
+
+        // then
+        assertThat(matchingQueueService.getMyMatchState(1L).status()).isEqualTo("IDLE");
+        assertThat(matchingQueueService.getMyMatchState(2L).status()).isEqualTo("IDLE");
+        assertThat(matchingQueueService.getMyMatchState(3L).status()).isEqualTo("IDLE");
+        assertThat(matchingQueueService.getMyMatchState(4L).status()).isEqualTo("IDLE");
     }
 }

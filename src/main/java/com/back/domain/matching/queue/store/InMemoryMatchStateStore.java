@@ -6,11 +6,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.springframework.stereotype.Component;
 
 import com.back.domain.matching.queue.dto.MatchStateResponse;
 import com.back.domain.matching.queue.dto.QueueStateResponse;
+import com.back.domain.matching.queue.model.MatchSession;
+import com.back.domain.matching.queue.model.MatchSessionStatus;
 import com.back.domain.matching.queue.model.QueueKey;
 import com.back.domain.matching.queue.model.WaitingUser;
 
@@ -20,7 +23,8 @@ import com.back.domain.matching.queue.model.WaitingUser;
  * 역할:
  * - 실제 대기열(waitingQueues)
  * - 유저별 큐 참여 정보(userQueueMap)
- * - 유저별 매칭 완료 room 정보(matchedRoomMap)
+ * - 유저별 매치 연결 정보(userMatchMap)
+ * - 매치 그룹 상태 본문(matchSessionMap)
  *
  * 를 한 곳에 모아두고,
  * MatchingQueueService는 이 저장소를 통해서만 상태를 다루게 만든다.
@@ -62,17 +66,34 @@ public class InMemoryMatchStateStore implements MatchStateStore {
     private final Map<Long, QueueKey> userQueueMap = new ConcurrentHashMap<>();
 
     /**
-     * 매칭 완료 후 유저가 어느 방으로 이동해야 하는지 저장
+     * 특정 유저가 현재 어느 매치 세션에 연결되어 있는지 찾는 인덱스
      *
-     * 목적:
-     * - /matches/me 조회 시 MATCHED 상태와 roomId 반환
-     * - 방 입장 성공 후 clearMatchedRoom으로 정리
+     * 기존에는 userId -> roomId 만 저장했지만,
+     * 이제는 유저가 "어느 매치 그룹에 속하는지"를 먼저 찾고
+     * 실제 매치 상태는 MatchSession 본문에서 조회한다.
      *
      * 예:
-     * 1L -> 101L
-     * 7L -> 101L
+     * 1L -> 10L
+     * 2L -> 10L
      */
-    private final Map<Long, Long> matchedRoomMap = new ConcurrentHashMap<>();
+    private final Map<Long, Long> userMatchMap = new ConcurrentHashMap<>();
+
+    /**
+     * matchId 기준 실제 매치 그룹 상태를 저장하는 본문
+     *
+     * 지금 단계에서는 MATCHED 상태와 roomId만 담지만,
+     * 이후 ready-check 단계로 가면 acceptedUsers, deadline 같은 상태를
+     * 여기에 확장해서 넣을 수 있다.
+     */
+    private final Map<Long, MatchSession> matchSessionMap = new ConcurrentHashMap<>();
+
+    /**
+     * 인메모리 환경에서 matchId를 순차적으로 발급하기 위한 시퀀스
+     *
+     * 지금은 단일 서버 MVP 기준이라 AtomicLong으로 충분하고,
+     * 이후 Redis 전환 시에는 외부 저장소 기준 ID 생성 전략으로 교체할 수 있다.
+     */
+    private final AtomicLong matchSequence = new AtomicLong(1L);
 
     /**
      * 유저를 대기열에 넣는다.
@@ -249,19 +270,30 @@ public class InMemoryMatchStateStore implements MatchStateStore {
      * 동작 순서:
      * 1. userQueueMap에서 제거
      *    -> 더 이상 대기열 참가 상태가 아님
-     * 2. matchedRoomMap에 roomId 기록
-     *    -> /matches/me 조회 시 MATCHED + roomId 응답 가능
+     * 2. MatchSession을 생성하고 각 유저를 해당 matchId에 연결
+     *    -> /matches/me 조회 시 userId -> matchId -> MatchSession 순서로 MATCHED + roomId 응답 가능
      * 3. 해당 큐가 비었으면 waitingQueues에서도 제거
      *
      * 즉, 이 시점부터 유저는
      * "대기열에 있는 사용자"가 아니라
-     * "입장해야 할 방이 정해진 사용자"가 된다.
+     * "어느 매치 그룹에 속해 있고, 그 결과로 입장해야 할 방이 정해진 사용자"가 된다.
      */
     @Override
     public void markMatched(QueueKey queueKey, List<WaitingUser> matchedUsers, Long roomId) {
+        Long matchId = matchSequence.getAndIncrement();
+
+        List<Long> participantIds =
+                matchedUsers.stream().map(WaitingUser::getUserId).toList();
+
+        MatchSession matchSession = MatchSession.matched(matchId, participantIds, roomId);
+
+        // 세션 본문을 먼저 저장해두면, 이후 userMatchMap 연결 시점에
+        // /matches/me 조회가 들어와도 matchId -> session 조회가 가능하다.
+        matchSessionMap.put(matchId, matchSession);
+
         matchedUsers.forEach(user -> {
             userQueueMap.remove(user.getUserId());
-            matchedRoomMap.put(user.getUserId(), roomId);
+            userMatchMap.put(user.getUserId(), matchId);
         });
 
         Deque<WaitingUser> queue = waitingQueues.get(queueKey);
@@ -338,9 +370,11 @@ public class InMemoryMatchStateStore implements MatchStateStore {
      * /matches/me 응답용 상태 조회
      *
      * 우선순위:
-     * 1. matchedRoomMap에 있으면 MATCHED
-     * 2. userQueueMap에 있으면 SEARCHING
-     * 3. 둘 다 없으면 IDLE
+     * 1. userMatchMap에 연결된 matchId가 있으면 MatchSession 조회
+     * 2. session이 살아 있고 MATCHED 상태면 MATCHED
+     * 3. userMatchMap은 있는데 session이 없으면 stale 상태로 보고 정리
+     * 4. userQueueMap에 있으면 SEARCHING
+     * 5. 둘 다 없으면 IDLE
      *
      * 즉 상태 해석은 다음과 같다.
      * - MATCHED   : 방이 잡혔고 roomId가 있음
@@ -349,10 +383,18 @@ public class InMemoryMatchStateStore implements MatchStateStore {
      */
     @Override
     public MatchStateResponse getMatchState(Long userId) {
-        Long roomId = matchedRoomMap.get(userId);
+        Long matchId = userMatchMap.get(userId);
 
-        if (roomId != null) {
-            return new MatchStateResponse("MATCHED", roomId);
+        if (matchId != null) {
+            MatchSession matchSession = matchSessionMap.get(matchId);
+
+            if (matchSession != null && matchSession.status() == MatchSessionStatus.MATCHED) {
+                return new MatchStateResponse("MATCHED", matchSession.roomId());
+            }
+
+            // userMatchMap에는 연결이 남아 있는데 실제 세션이 없으면
+            // 더 이상 유효한 매칭 상태가 아니므로 조회 시점에 정리한다.
+            cleanupStaleUserMatch(userId, matchId);
         }
 
         if (userQueueMap.containsKey(userId)) {
@@ -365,14 +407,37 @@ public class InMemoryMatchStateStore implements MatchStateStore {
     /**
      * 방 입장 성공 후 matched 상태를 정리한다.
      *
-     * remove(userId, roomId) 형태를 사용하면
-     * "해당 유저가 정말 그 roomId로 매칭되어 있을 때만" 제거된다.
+     * 지금 단계에서는 "방 입장을 끝낸 사용자"만 userMatchMap에서 분리하고,
+     * 같은 matchId를 참조하는 사용자가 더 이상 없을 때만 MatchSession 본문도 제거한다.
      *
-     * 즉, 잘못된 roomId 요청으로 다른 매칭 정보가 지워지는 것을 막는 안전장치 역할도 한다.
+     * roomId를 함께 검증하는 이유:
+     * 잘못된 roomId 요청으로 다른 매치 연결이 지워지지 않도록 하기 위해서다.
      */
     @Override
     public void clearMatchedRoom(Long userId, Long roomId) {
-        matchedRoomMap.remove(userId, roomId);
+        if (roomId == null) {
+            return;
+        }
+
+        Long matchId = userMatchMap.get(userId);
+
+        if (matchId == null) {
+            return;
+        }
+
+        MatchSession matchSession = matchSessionMap.get(matchId);
+
+        if (matchSession == null) {
+            userMatchMap.remove(userId, matchId);
+            return;
+        }
+
+        if (!roomId.equals(matchSession.roomId())) {
+            return;
+        }
+
+        userMatchMap.remove(userId, matchId);
+        removeMatchSessionIfUnreferenced(matchId);
     }
 
     /**
@@ -384,5 +449,28 @@ public class InMemoryMatchStateStore implements MatchStateStore {
     @Override
     public boolean hasQueue(QueueKey queueKey) {
         return waitingQueues.containsKey(queueKey);
+    }
+
+    /**
+     * userMatchMap에는 연결이 남아 있지만 실제 MatchSession이 없을 때
+     * 조회 시점에 해당 사용자의 stale 연결을 정리한다.
+     */
+    private void cleanupStaleUserMatch(Long userId, Long matchId) {
+        userMatchMap.remove(userId, matchId);
+        removeMatchSessionIfUnreferenced(matchId);
+    }
+
+    /**
+     * 같은 matchId를 참조하는 사용자가 더 이상 없으면
+     * MatchSession 본문도 함께 제거한다.
+     *
+     * 현재는 한 매치 최대 인원이 작고(4명), 인메모리 MVP 단계라
+     * containsValue 기반 선형 확인으로도 충분하다.
+     * 이후 Redis 단계에서는 더 적합한 카운트/집합 구조로 바꿀 수 있다.
+     */
+    private void removeMatchSessionIfUnreferenced(Long matchId) {
+        if (!userMatchMap.containsValue(matchId)) {
+            matchSessionMap.remove(matchId);
+        }
     }
 }
