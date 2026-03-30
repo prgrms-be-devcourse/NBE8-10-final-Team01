@@ -18,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 public class BattleWebSocketHandler {
 
     private final SimpMessagingTemplate messagingTemplate;
+    private final BattleCodeStore battleCodeStore;
 
     /**
      * 참여자가 코드 변경 시 호출
@@ -38,5 +39,8 @@ public class BattleWebSocketHandler {
                         "type", "CODE_UPDATE",
                         "userId", securityUser.getId(),
                         "code", message.code()));
+
+        // 재입장 시 코드 복원을 위해 Redis에 임시 저장
+        battleCodeStore.save(roomId, securityUser.getId(), message.code());
     }
 }
