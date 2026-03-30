@@ -11,8 +11,6 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import org.springframework.stereotype.Component;
 
-import com.back.domain.matching.queue.dto.MatchStateResponse;
-import com.back.domain.matching.queue.dto.QueueStateResponse;
 import com.back.domain.matching.queue.dto.QueueStateV2Response;
 import com.back.domain.matching.queue.model.MatchSession;
 import com.back.domain.matching.queue.model.MatchSessionStatus;
@@ -30,7 +28,7 @@ import com.back.domain.matching.queue.model.WaitingUser;
  * - 매치 그룹 상태 본문(matchSessionMap)
  *
  * 를 한 곳에 모아두고,
- * MatchingQueueService는 이 저장소를 통해서만 상태를 다루게 만든다.
+ * matching 서비스들은 이 저장소를 통해서만 상태를 다루게 만든다.
  *
  * 즉,
  * 서비스는 "큐에 참가", "취소", "매칭 후보 추출", "매칭 완료 처리" 같은 흐름만 담당하고
@@ -89,11 +87,8 @@ public class InMemoryMatchStateStore implements MatchStateStore {
     /**
      * matchId 기준 실제 매치 그룹 상태를 저장하는 본문
      *
-     * 지금 단계에서는 MATCHED 상태와 roomId만 담지만,
-     * 이후 ready-check 단계로 가면 acceptedUsers, deadline 같은 상태를
-     * 여기에 확장해서 넣을 수 있다.
-     *
      * 현재 v2에서는 participantDecisions와 deadline도 이 본문 안에 같이 저장한다.
+     * 즉 matchSessionMap이 ready-check 세션의 단일 원본이다.
      */
     private final Map<Long, MatchSession> matchSessionMap = new ConcurrentHashMap<>();
 
@@ -275,41 +270,6 @@ public class InMemoryMatchStateStore implements MatchStateStore {
     }
 
     /**
-     * 방 생성 성공 시 유저들을 SEARCHING -> MATCHED 상태로 전환한다.
-     *
-     * 동작 순서:
-     * 1. userQueueMap에서 제거
-     *    -> 더 이상 대기열 참가 상태가 아님
-     * 2. MatchSession을 생성하고 각 유저를 해당 matchId에 연결
-     *    -> /matches/me 조회 시 userId -> matchId -> MatchSession 순서로 MATCHED + roomId 응답 가능
-     * 3. 해당 큐가 비었으면 waitingQueues에서도 제거
-     *
-     * 즉, 이 시점부터 유저는
-     * "대기열에 있는 사용자"가 아니라
-     * "어느 매치 그룹에 속해 있고, 그 결과로 입장해야 할 방이 정해진 사용자"가 된다.
-     */
-    @Override
-    public void markMatched(QueueKey queueKey, List<WaitingUser> matchedUsers, Long roomId) {
-        Long matchId = matchSequence.getAndIncrement();
-
-        List<Long> participantIds =
-                matchedUsers.stream().map(WaitingUser::getUserId).toList();
-
-        MatchSession matchSession = MatchSession.matched(matchId, queueKey, participantIds, roomId);
-
-        // 세션 본문을 먼저 저장해두면, 이후 userMatchMap 연결 시점에
-        // /matches/me 조회가 들어와도 matchId -> session 조회가 가능하다.
-        matchSessionMap.put(matchId, matchSession);
-
-        matchedUsers.forEach(user -> {
-            userQueueMap.remove(user.getUserId());
-            userMatchMap.put(user.getUserId(), matchId);
-        });
-
-        cleanupEmptyQueue(queueKey);
-    }
-
-    /**
      * v2 ready-check 시작 시 유저들을 SEARCHING -> ACCEPT_PENDING 상태로 전환한다.
      *
      * 여기서는 roomId를 만들지 않고 세션만 만든다.
@@ -326,7 +286,7 @@ public class InMemoryMatchStateStore implements MatchStateStore {
 
         MatchSession matchSession = MatchSession.acceptPending(matchId, queueKey, participantIds, deadline);
 
-        // v1의 markMatched와 마찬가지로 세션 본문을 먼저 저장한 뒤
+        // 세션 본문을 먼저 저장한 뒤
         // user -> match 연결을 만든다.
         matchSessionMap.put(matchId, matchSession);
 
@@ -493,68 +453,6 @@ public class InMemoryMatchStateStore implements MatchStateStore {
      * - userQueueMap에는 있는데 실제 queue가 없으면
      *   조회 시 false 처리하고 stale 데이터 정리
      */
-    @Override
-    public QueueStateResponse getQueueState(Long userId) {
-        QueueKey queueKey = userQueueMap.get(userId);
-
-        if (queueKey == null) {
-            return new QueueStateResponse(false, null, null, 0);
-        }
-
-        Deque<WaitingUser> queue = waitingQueues.get(queueKey);
-
-        // 기존 동작 유지:
-        // userQueueMap에는 있는데 실제 queue가 없으면 조회 시 false 처리하고 정리
-        if (queue == null) {
-            userQueueMap.remove(userId, queueKey);
-            return new QueueStateResponse(false, null, null, 0);
-        }
-
-        synchronized (queue) {
-            return new QueueStateResponse(
-                    true, queueKey.category(), queueKey.difficulty().name(), queue.size());
-        }
-    }
-
-    /**
-     * /matches/me 응답용 상태 조회
-     *
-     * 우선순위:
-     * 1. userMatchMap에 연결된 matchId가 있으면 MatchSession 조회
-     * 2. session이 살아 있고 MATCHED 상태면 MATCHED
-     * 3. userMatchMap은 있는데 session이 없으면 stale 상태로 보고 정리
-     * 4. userQueueMap에 있으면 SEARCHING
-     * 5. 둘 다 없으면 IDLE
-     *
-     * 즉 상태 해석은 다음과 같다.
-     * - MATCHED   : 방이 잡혔고 roomId가 있음
-     * - SEARCHING : 아직 큐에서 매칭 대기 중
-     * - IDLE      : 대기 중도 아니고 매칭 완료 상태도 아님
-     *
-     * v2 세션이 이미 ROOM_READY로 넘어가더라도,
-     * v1 프론트는 "방이 준비되었는가"만 알면 되므로 MATCHED로 해석해 호환성을 유지한다.
-     */
-    @Override
-    public MatchStateResponse getMatchState(Long userId) {
-        Long matchId = userMatchMap.get(userId);
-
-        if (matchId != null) {
-            MatchSession matchSession = matchSessionMap.get(matchId);
-
-            if (matchSession == null) {
-                cleanupStaleUserMatch(userId, matchId);
-            } else if (matchSession.status() == MatchSessionStatus.MATCHED
-                    || matchSession.status() == MatchSessionStatus.ROOM_READY) {
-                return new MatchStateResponse("MATCHED", matchSession.roomId());
-            }
-        }
-
-        if (userQueueMap.containsKey(userId)) {
-            return new MatchStateResponse("SEARCHING", null);
-        }
-
-        return new MatchStateResponse("IDLE", null);
-    }
 
     /**
      * /queue/me 응답용 상태 조회
@@ -623,7 +521,7 @@ public class InMemoryMatchStateStore implements MatchStateStore {
     }
 
     /**
-     * 방 입장 성공 후 matched 상태를 정리한다.
+     * 방 입장 성공 후 room-ready 세션 연결을 정리한다.
      *
      * 지금 단계에서는 "방 입장을 끝낸 사용자"만 userMatchMap에서 분리하고,
      * 같은 matchId를 참조하는 사용자가 더 이상 없을 때만 MatchSession 본문도 제거한다.
@@ -659,17 +557,6 @@ public class InMemoryMatchStateStore implements MatchStateStore {
         userMatchMap.remove(userId, matchId);
         // 유저 매치맵이 다 삭제되면 그 후에 매칭방삭제
         removeMatchSessionIfUnreferenced(matchId);
-    }
-
-    /**
-     * 테스트 호환용 보조 메서드
-     *
-     * 현재 해당 queueKey에 대한 큐 객체가 존재하는지만 확인한다.
-     * 실서비스 핵심 로직보다는 테스트/검증 성격에 가깝다.
-     */
-    @Override
-    public boolean hasQueue(QueueKey queueKey) {
-        return waitingQueues.containsKey(queueKey);
     }
 
     private MatchSession requireMatchSession(Long matchId) {

@@ -6,7 +6,6 @@ package com.back.domain.matching.queue.model;
  * 이번 단계에서는 프론트/API를 바꾸지 않는 것이 목표이므로
  * 최소 상태만 먼저 도입한다.
  *
- * - MATCHED: 4명 매칭이 완료되고 roomId까지 배정된 상태
  * - CLOSED:  모든 참가자의 매칭 연결이 정리되어 더 이상 조회 대상이 아닌 상태
  *
  * 이후 롤 매칭 단계로 확장할 때
@@ -19,8 +18,6 @@ package com.back.domain.matching.queue.model;
  * - CANCELLED: 누군가 거절했거나 방 생성이 실패해 종료된 상태
  */
 public enum MatchSessionStatus {
-    // v1 즉시매칭에서 사용하던 기존 완료 상태
-    MATCHED,
     // v2 ready-check가 시작됐지만 아직 전원 수락 전인 상태
     ACCEPT_PENDING,
     // 전원 수락이 끝나 roomId까지 연결된 상태
