@@ -59,10 +59,9 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                             SecurityUser securityUser = new SecurityUser(memberId, null, null, "ROLE_USER");
                             UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
                                     securityUser, null, securityUser.getAuthorities());
-                            StompHeaderAccessor mutableAccessor =
-                                    MessageHeaderAccessor.getMutableAccessor(message, StompHeaderAccessor.class);
-                            if (mutableAccessor != null) {
-                                mutableAccessor.setUser(auth);
+                            MessageHeaderAccessor mutableAccessor = MessageHeaderAccessor.getMutableAccessor(message);
+                            if (mutableAccessor instanceof StompHeaderAccessor stompAccessor) {
+                                stompAccessor.setUser(auth);
                             }
                         } else {
                             log.warn("WebSocket 세션 등록 실패 - 인증 정보 없음. sessionId={}", accessor.getSessionId());

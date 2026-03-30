@@ -123,7 +123,7 @@ public class MatchingQueueService {
     }
 
     private Long resolveProblemIdForMatch(QueueKey queueKey, List<Long> participantIds) {
-        return 1L;
+        return queueProblemPicker.pick(queueKey, participantIds);
     }
 
     boolean hasQueue(QueueKey queueKey) {
