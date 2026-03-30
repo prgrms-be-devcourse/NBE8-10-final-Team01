@@ -44,7 +44,9 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
             @Override
             public Message<?> preSend(Message<?> message, MessageChannel channel) {
                 // 메시지가 핸들러로 가기 직전에 실행됨
-                StompHeaderAccessor accessor = StompHeaderAccessor.wrap(message);
+                // wrap()은 읽기전용 래퍼를 생성하므로, 원본 뮤터블 accessor를 가져와야 setUser()가 실제 메시지에 반영됨
+                StompHeaderAccessor accessor = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
+                if (accessor == null) return message;
                 if (StompCommand.CONNECT.equals(accessor.getCommand())) {
                     // 핸드셰이크 시점에 JwtHandshakeInterceptor가 저장한 memberId를 세션 속성에서 꺼냄
                     Map<String, Object> sessionAttributes = accessor.getSessionAttributes();
@@ -60,10 +62,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                                     new SecurityUser(memberId, memberId.toString(), null, "ROLE_USER");
                             UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
                                     securityUser, null, securityUser.getAuthorities());
-                            MessageHeaderAccessor mutableAccessor = MessageHeaderAccessor.getMutableAccessor(message);
-                            if (mutableAccessor instanceof StompHeaderAccessor stompAccessor) {
-                                stompAccessor.setUser(auth);
-                            }
+                            accessor.setUser(auth);
                         } else {
                             log.warn("WebSocket 세션 등록 실패 - 인증 정보 없음. sessionId={}", accessor.getSessionId());
                         }
