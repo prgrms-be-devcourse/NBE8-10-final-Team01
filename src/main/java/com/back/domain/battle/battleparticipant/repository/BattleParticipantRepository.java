@@ -50,4 +50,22 @@ public interface BattleParticipantRepository extends JpaRepository<BattlePartici
                     """)
     Page<BattleParticipant> findFinishedBattleResultsByMemberId(
             @Param("memberId") Long memberId, @Param("status") BattleRoomStatus status, Pageable pageable);
+
+    /**
+     * 현재 배틀 중인 방에서 PLAYING 상태인 특정 유저의 참여자 정보를 조회
+     * 유저도 PLAYING 상태,
+     * 방도 PLAYING 상태
+     * - p.status = PLAYING — 이미 EXIT이거나 ABANDONED인 유저는 이탈 처리 안 함
+     * - r.status = PLAYING — 이미 끝난 방(FINISHED)의 참여자는 건드리지 않음
+     * join fetch p.battleRoom 을 쓰는 이유는
+     * 핸들러에서 participant.getBattleRoom().getId()를 호출할 때 N+1 문제 방지
+     */
+    @Query("""
+                    select p from BattleParticipant p
+                    join fetch p.battleRoom r
+                    where p.member.id = :memberId
+                      and p.status = com.back.domain.battle.battleparticipant.entity.BattleParticipantStatus.PLAYING
+                      and r.status = com.back.domain.battle.battleroom.entity.BattleRoomStatus.PLAYING
+                    """)
+    Optional<BattleParticipant> findPlayingParticipantByMemberId(@Param("memberId") Long memberId);
 }

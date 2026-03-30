@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.back.domain.battle.battleroom.dto.BattleRoomStateResponse;
 import com.back.domain.battle.battleroom.dto.CreateRoomRequest;
 import com.back.domain.battle.battleroom.dto.CreateRoomResponse;
 import com.back.domain.battle.battleroom.dto.JoinRoomResponse;
@@ -47,5 +48,14 @@ public class BattleRoomController {
     @GetMapping("/{roomId}")
     public RoomResponse getRoomInfo(@PathVariable Long roomId) {
         return battleRoomService.getRoomInfo(roomId);
+    }
+
+    /**
+     * 재입장 할때 사용하는 방 state 조회 함수
+     */
+    @GetMapping("/{roomId}/state")
+    public BattleRoomStateResponse getRoomState(@PathVariable Long roomId) {
+        Long memberId = rq.getActor().getId();
+        return battleRoomService.getRoomState(roomId, memberId);
     }
 }

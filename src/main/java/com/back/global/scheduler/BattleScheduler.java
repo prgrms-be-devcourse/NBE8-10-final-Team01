@@ -26,7 +26,7 @@ public class BattleScheduler {
      * 10초마다 타이머가 만료된 PLAYING 방을 조회해 결과 정산
      * BattleResultService.settle() 내부에서 FINISHED 체크로 중복 정산 방지
      */
-    @Scheduled(fixedDelay = 10_000)
+    @Scheduled(fixedDelay = 10_000_000)
     public void checkExpiredRooms() {
         List<BattleRoom> expiredRooms =
                 battleRoomRepository.findByStatusAndTimerEndBefore(BattleRoomStatus.PLAYING, LocalDateTime.now());

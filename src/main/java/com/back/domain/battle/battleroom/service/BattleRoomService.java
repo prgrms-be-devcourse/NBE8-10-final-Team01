@@ -13,6 +13,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import com.back.domain.battle.battleparticipant.entity.BattleParticipant;
 import com.back.domain.battle.battleparticipant.entity.BattleParticipantStatus;
 import com.back.domain.battle.battleparticipant.repository.BattleParticipantRepository;
+import com.back.domain.battle.battleroom.dto.BattleRoomStateResponse;
 import com.back.domain.battle.battleroom.dto.CreateRoomRequest;
 import com.back.domain.battle.battleroom.dto.CreateRoomResponse;
 import com.back.domain.battle.battleroom.dto.JoinRoomResponse;
@@ -24,6 +25,7 @@ import com.back.domain.member.member.entity.Member;
 import com.back.domain.member.member.repository.MemberRepository;
 import com.back.domain.problem.problem.entity.Problem;
 import com.back.domain.problem.problem.repository.ProblemRepository;
+import com.back.global.websocket.BattleCodeStore;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -38,6 +40,7 @@ public class BattleRoomService {
     private final ProblemRepository problemRepository;
     private final MemberRepository memberRepository;
     private final SimpMessagingTemplate messagingTemplate;
+    private final BattleCodeStore battleCodeStore;
 
     @Transactional
     public CreateRoomResponse createRoom(CreateRoomRequest request) {
@@ -69,12 +72,13 @@ public class BattleRoomService {
     @Transactional
     public JoinRoomResponse joinRoom(Long roomId, Long memberId) {
 
-        // 1. BattleRoom 조회 + WAITING 상태 검증 (비관적 락으로 동시 joinRoom 직렬화)
+        // 1. BattleRoom 조회 (비관적 락으로 동시 joinRoom 직렬화)
         BattleRoom room = battleRoomRepository
                 .findByIdWithLock(roomId)
                 .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 방입니다."));
 
-        if (room.getStatus() != BattleRoomStatus.WAITING) {
+        // WAITING(최초 입장) 또는 PLAYING(재입장) 상태만 허용
+        if (room.getStatus() != BattleRoomStatus.WAITING && room.getStatus() != BattleRoomStatus.PLAYING) {
             throw new IllegalStateException("입장할 수 없는 상태의 방입니다. 현재 상태: " + room.getStatus());
         }
 
@@ -87,32 +91,43 @@ public class BattleRoomService {
                 .findByBattleRoomAndMember(room, member)
                 .orElseThrow(() -> new IllegalArgumentException("해당 방의 참여자가 아닙니다."));
 
-        // 4. READY → PLAYING 상태 바꾸기
-        participant.join();
-        battleParticipantRepository.save(participant);
+        // 4. 참여자 상태에 따라 분기
+        //    READY     → 최초 입장 (WAITING 상태 방)
+        //    ABANDONED → 재입장 (PLAYING 상태 방)
+        if (participant.getStatus() == BattleParticipantStatus.READY
+                || participant.getStatus() == BattleParticipantStatus.ABANDONED) {
+            participant.join();
+            battleParticipantRepository.save(participant);
+        } else {
+            throw new IllegalStateException("입장할 수 없는 참여자 상태입니다. 현재 상태: " + participant.getStatus());
+        }
 
-        // 5. 모든 참여자가 PLAYING이면 배틀 시작
-        List<BattleParticipant> allParticipants = battleParticipantRepository.findByBattleRoom(room);
-        boolean allPlaying = allParticipants.stream().allMatch(p -> p.getStatus() == BattleParticipantStatus.PLAYING);
+        // 5. 최초 입장 시에만 allPlaying 체크 → 전원 PLAYING이면 배틀 시작
+        //    재입장(PLAYING 방)은 이미 배틀이 시작된 상태이므로 체크하지 않음
+        if (room.getStatus() == BattleRoomStatus.WAITING) {
+            List<BattleParticipant> allParticipants = battleParticipantRepository.findByBattleRoom(room);
+            boolean allPlaying =
+                    allParticipants.stream().allMatch(p -> p.getStatus() == BattleParticipantStatus.PLAYING);
 
-        if (allPlaying) {
-            room.startBattle(Duration.ofMinutes(30));
-            battleRoomRepository.save(room);
-            String timerEnd = room.getTimerEnd().toString();
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void afterCommit() {
-                    // 커밋 후이므로 예외를 전파해도 트랜잭션 롤백이 불가능하고,
-                    // 클라이언트에게 500이 반환되어 DB는 성공했는데 실패로 인식하는 혼란을 유발함.
-                    // WebSocket은 실시간 알림 역할이므로 전송 실패가 치명적이지 않아 예외를 삼키고 로그만 남김.
-                    try {
-                        messagingTemplate.convertAndSend(
-                                "/topic/room/" + roomId, Map.of("type", "BATTLE_STARTED", "timerEnd", timerEnd));
-                    } catch (Exception e) {
-                        log.error("BATTLE_STARTED WebSocket 전송 실패 roomId={}", roomId, e);
+            if (allPlaying) {
+                room.startBattle(Duration.ofMinutes(30));
+                battleRoomRepository.save(room);
+                String timerEnd = room.getTimerEnd().toString();
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        // 커밋 후이므로 예외를 전파해도 트랜잭션 롤백이 불가능하고,
+                        // 클라이언트에게 500이 반환되어 DB는 성공했는데 실패로 인식하는 혼란을 유발함.
+                        // WebSocket은 실시간 알림 역할이므로 전송 실패가 치명적이지 않아 예외를 삼키고 로그만 남김.
+                        try {
+                            messagingTemplate.convertAndSend(
+                                    "/topic/room/" + roomId, Map.of("type", "BATTLE_STARTED", "timerEnd", timerEnd));
+                        } catch (Exception e) {
+                            log.error("BATTLE_STARTED WebSocket 전송 실패 roomId={}", roomId, e);
+                        }
                     }
-                }
-            });
+                });
+            }
         }
 
         return JoinRoomResponse.from(room);
@@ -121,10 +136,23 @@ public class BattleRoomService {
     @Transactional(readOnly = true)
     public RoomResponse getRoomInfo(Long roomId) {
 
-        BattleRoom room =
-                battleRoomRepository.findById(roomId).orElseThrow(() -> new IllegalArgumentException("존재하지 않는 방입니다."));
+        BattleRoom room = battleRoomRepository
+                .findByIdWithProblem(roomId)
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 방입니다."));
 
         List<BattleParticipant> participants = battleParticipantRepository.findByBattleRoom(room);
         return RoomResponse.from(room, participants);
+    }
+
+    @Transactional(readOnly = true)
+    public BattleRoomStateResponse getRoomState(Long roomId, Long memberId) {
+
+        BattleRoom room = battleRoomRepository
+                .findByIdWithProblem(roomId)
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 방입니다."));
+
+        List<BattleParticipant> participants = battleParticipantRepository.findByBattleRoom(room);
+        String myCode = battleCodeStore.get(roomId, memberId);
+        return BattleRoomStateResponse.from(room, participants, myCode);
     }
 }

@@ -24,6 +24,9 @@ public interface BattleRoomRepository extends JpaRepository<BattleRoom, Long> {
     // 특정 상태의 방 목록 조회 (관전용)
     List<BattleRoom> findByStatus(BattleRoomStatus status);
 
+    @Query("SELECT r FROM BattleRoom r JOIN FETCH r.problem WHERE r.id = :id")
+    Optional<BattleRoom> findByIdWithProblem(@Param("id") Long id);
+
     // joinRoom 동시 요청 직렬화용 비관적 락 조회
     // 타임아웃 1000ms: 정상 joinRoom 트랜잭션은 수백ms 내 완료되므로 충분한 여유.
     // 배포 후 실제 응답시간 측정 후 조정 권장.
