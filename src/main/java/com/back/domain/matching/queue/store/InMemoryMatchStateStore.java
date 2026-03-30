@@ -1,5 +1,6 @@
 package com.back.domain.matching.queue.store;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
@@ -12,9 +13,11 @@ import org.springframework.stereotype.Component;
 
 import com.back.domain.matching.queue.dto.MatchStateResponse;
 import com.back.domain.matching.queue.dto.QueueStateResponse;
+import com.back.domain.matching.queue.dto.QueueStateV2Response;
 import com.back.domain.matching.queue.model.MatchSession;
 import com.back.domain.matching.queue.model.MatchSessionStatus;
 import com.back.domain.matching.queue.model.QueueKey;
+import com.back.domain.matching.queue.model.ReadyDecision;
 import com.back.domain.matching.queue.model.WaitingUser;
 
 /**
@@ -36,9 +39,14 @@ import com.back.domain.matching.queue.model.WaitingUser;
  * 지금은 인메모리 기반이지만,
  * 이후 Redis 등 외부 저장소로 바꾸더라도 서비스 로직 변경을 최소화하기 위해
  * 저장 경계를 먼저 분리한 구조다.
+ *
+ * 이번 단계에서는 같은 저장소 안에 v2 ready-check 상태도 함께 저장한다.
+ * 다만 v1과 v2가 같은 상태를 어떻게 해석할지는 서비스/DTO 계층에서 분리한다.
  */
 @Component
 public class InMemoryMatchStateStore implements MatchStateStore {
+
+    private static final int REQUIRED_MATCH_SIZE = 4;
 
     /**
      * 카테고리 + 난이도별 실제 대기열
@@ -84,6 +92,8 @@ public class InMemoryMatchStateStore implements MatchStateStore {
      * 지금 단계에서는 MATCHED 상태와 roomId만 담지만,
      * 이후 ready-check 단계로 가면 acceptedUsers, deadline 같은 상태를
      * 여기에 확장해서 넣을 수 있다.
+     *
+     * 현재 v2에서는 participantDecisions와 deadline도 이 본문 안에 같이 저장한다.
      */
     private final Map<Long, MatchSession> matchSessionMap = new ConcurrentHashMap<>();
 
@@ -285,7 +295,7 @@ public class InMemoryMatchStateStore implements MatchStateStore {
         List<Long> participantIds =
                 matchedUsers.stream().map(WaitingUser::getUserId).toList();
 
-        MatchSession matchSession = MatchSession.matched(matchId, participantIds, roomId);
+        MatchSession matchSession = MatchSession.matched(matchId, queueKey, participantIds, roomId);
 
         // 세션 본문을 먼저 저장해두면, 이후 userMatchMap 연결 시점에
         // /matches/me 조회가 들어와도 matchId -> session 조회가 가능하다.
@@ -296,17 +306,157 @@ public class InMemoryMatchStateStore implements MatchStateStore {
             userMatchMap.put(user.getUserId(), matchId);
         });
 
-        Deque<WaitingUser> queue = waitingQueues.get(queueKey);
+        cleanupEmptyQueue(queueKey);
+    }
 
-        if (queue == null) {
-            return;
+    /**
+     * v2 ready-check 시작 시 유저들을 SEARCHING -> ACCEPT_PENDING 상태로 전환한다.
+     *
+     * 여기서는 roomId를 만들지 않고 세션만 만든다.
+     * 왜냐하면 ready-check에서는 "4명이 모였다"와 "전원 수락해 방이 준비됐다"를
+     * 다른 상태로 분리해야 하기 때문이다.
+     */
+    @Override
+    public MatchSession markAcceptPending(QueueKey queueKey, List<WaitingUser> matchedUsers, LocalDateTime deadline) {
+        Long matchId = matchSequence.getAndIncrement();
+        // WaitingUser는 queue에 묶인 임시 객체이고,
+        // 세션 본문에는 결국 userId 목록만 남기면 되므로 여기서 변환한다.
+        List<Long> participantIds =
+                matchedUsers.stream().map(WaitingUser::getUserId).toList();
+
+        MatchSession matchSession = MatchSession.acceptPending(matchId, queueKey, participantIds, deadline);
+
+        // v1의 markMatched와 마찬가지로 세션 본문을 먼저 저장한 뒤
+        // user -> match 연결을 만든다.
+        matchSessionMap.put(matchId, matchSession);
+
+        matchedUsers.forEach(user -> {
+            // ready-check로 넘어간 사용자는 더 이상 SEARCHING queue 참가자가 아니다.
+            // 큐 맵에서 지워서 false로 되면 폴링중단
+            userQueueMap.remove(user.getUserId());
+            userMatchMap.put(user.getUserId(), matchId);
+        });
+
+        cleanupEmptyQueue(queueKey);
+        return matchSession;
+    }
+
+    /**
+     * 특정 참가자의 decision을 ACCEPTED로 바꾼다.
+     *
+     * 왜 여기서는 decision만 바꾸나?
+     * -> 전원 수락 여부 판단과 room 생성은 저장소 책임이 아니라
+     *    ReadyCheckService의 흐름 제어 책임으로 두기 위해서다.
+     */
+    @Override
+    public MatchSession accept(Long matchId, Long userId) {
+        MatchSession matchSession = requireMatchSession(matchId);
+
+        if (!matchSession.hasParticipant(userId)) {
+            throw new IllegalStateException("매치 참가자가 아닌 사용자는 수락할 수 없습니다.");
         }
 
-        synchronized (queue) {
-            if (queue.isEmpty()) {
-                waitingQueues.remove(queueKey, queue);
-            }
+        if (matchSession.isExpiredAt(LocalDateTime.now())) {
+            // 스케줄러 대신 lazy expire를 사용하므로,
+            // 읽기/액션 시점에 deadline을 넘겼으면 여기서 바로 EXPIRED로 바꾼다.
+            return expire(matchId);
         }
+
+        if (matchSession.status() != MatchSessionStatus.ACCEPT_PENDING) {
+            // 이미 ROOM_READY, CANCELLED, EXPIRED 같은 최종 상태면 더 바꾸지 않는다.
+            return matchSession;
+        }
+
+        if (matchSession.decisionOf(userId) == ReadyDecision.ACCEPTED) {
+            // 같은 사용자의 중복 accept는 현재 상태를 그대로 돌려준다.
+            return matchSession;
+        }
+
+        MatchSession updatedSession = matchSession.withDecision(userId, ReadyDecision.ACCEPTED);
+        matchSessionMap.put(matchId, updatedSession);
+        return updatedSession;
+    }
+
+    /**
+     * 특정 참가자의 decision을 DECLINED로 바꾸고 세션 전체를 취소 상태로 전환한다.
+     *
+     * ready-check에서 한 명이라도 거절하면 더 이상 같은 세션을 유지할 의미가 없으므로
+     * 세션 전체를 CANCELLED로 처리한다.
+     */
+    @Override
+    public MatchSession decline(Long matchId, Long userId) {
+        MatchSession matchSession = requireMatchSession(matchId);
+
+        if (!matchSession.hasParticipant(userId)) {
+            throw new IllegalStateException("매치 참가자가 아닌 사용자는 거절할 수 없습니다.");
+        }
+
+        if (matchSession.isExpiredAt(LocalDateTime.now())) {
+            // 거절을 누른 시점에 이미 deadline이 지났다면 거절보다 만료를 우선 반영한다.
+            return expire(matchId);
+        }
+
+        if (matchSession.status() != MatchSessionStatus.ACCEPT_PENDING) {
+            return matchSession;
+        }
+
+        // 이번 단계 정책에서는 한 명이 DECLINED가 되면 세션 전체를 종료한다.
+        MatchSession updatedSession =
+                matchSession.withDecision(userId, ReadyDecision.DECLINED).cancelled();
+        matchSessionMap.put(matchId, updatedSession);
+        return updatedSession;
+    }
+
+    /**
+     * 전원 수락이 끝난 뒤 roomId를 세션에 연결한다.
+     *
+     * 이 메서드를 별도로 둔 이유는
+     * ACCEPT_PENDING과 ROOM_READY를 명확히 나누기 위해서다.
+     */
+    @Override
+    public MatchSession markRoomReady(Long matchId, Long roomId) {
+        MatchSession matchSession = requireMatchSession(matchId);
+        // roomId가 세션에 연결되는 순간부터 프론트는 실제 입장 가능한 상태가 된다.
+        MatchSession updatedSession = matchSession.roomReady(roomId);
+        matchSessionMap.put(matchId, updatedSession);
+        return updatedSession;
+    }
+
+    /**
+     * deadline이 지난 ACCEPT_PENDING 세션을 EXPIRED로 바꾼다.
+     *
+     * 이미 최종 상태로 넘어간 세션은 그대로 두고,
+     * 수락 대기 중인 세션에만 만료를 적용한다.
+     */
+    @Override
+    public MatchSession expire(Long matchId) {
+        MatchSession matchSession = requireMatchSession(matchId);
+
+        if (matchSession.status() != MatchSessionStatus.ACCEPT_PENDING) {
+            // 이미 최종 상태로 바뀐 세션은 중복 만료 처리하지 않는다.
+            return matchSession;
+        }
+
+        MatchSession updatedSession = matchSession.expired();
+        matchSessionMap.put(matchId, updatedSession);
+        return updatedSession;
+    }
+
+    /**
+     * 거절 또는 방 생성 실패 같은 이유로 세션 전체를 취소 상태로 바꾼다.
+     */
+    @Override
+    public MatchSession cancelMatch(Long matchId) {
+        MatchSession matchSession = requireMatchSession(matchId);
+
+        if (matchSession.status() == MatchSessionStatus.CANCELLED) {
+            return matchSession;
+        }
+
+        // room 생성 실패 같은 시스템 사유도 ready-check 거절과 동일하게 취소 상태로 묶는다.
+        MatchSession updatedSession = matchSession.cancelled();
+        matchSessionMap.put(matchId, updatedSession);
+        return updatedSession;
     }
 
     /**
@@ -380,6 +530,9 @@ public class InMemoryMatchStateStore implements MatchStateStore {
      * - MATCHED   : 방이 잡혔고 roomId가 있음
      * - SEARCHING : 아직 큐에서 매칭 대기 중
      * - IDLE      : 대기 중도 아니고 매칭 완료 상태도 아님
+     *
+     * v2 세션이 이미 ROOM_READY로 넘어가더라도,
+     * v1 프론트는 "방이 준비되었는가"만 알면 되므로 MATCHED로 해석해 호환성을 유지한다.
      */
     @Override
     public MatchStateResponse getMatchState(Long userId) {
@@ -388,13 +541,12 @@ public class InMemoryMatchStateStore implements MatchStateStore {
         if (matchId != null) {
             MatchSession matchSession = matchSessionMap.get(matchId);
 
-            if (matchSession != null && matchSession.status() == MatchSessionStatus.MATCHED) {
+            if (matchSession == null) {
+                cleanupStaleUserMatch(userId, matchId);
+            } else if (matchSession.status() == MatchSessionStatus.MATCHED
+                    || matchSession.status() == MatchSessionStatus.ROOM_READY) {
                 return new MatchStateResponse("MATCHED", matchSession.roomId());
             }
-
-            // userMatchMap에는 연결이 남아 있는데 실제 세션이 없으면
-            // 더 이상 유효한 매칭 상태가 아니므로 조회 시점에 정리한다.
-            cleanupStaleUserMatch(userId, matchId);
         }
 
         if (userQueueMap.containsKey(userId)) {
@@ -402,6 +554,72 @@ public class InMemoryMatchStateStore implements MatchStateStore {
         }
 
         return new MatchStateResponse("IDLE", null);
+    }
+
+    /**
+     * /queue/me 응답용 상태 조회
+     *
+     * v2에서는 queue/me를 SEARCHING UI 전용으로 유지하므로,
+     * waitingCount와 함께 requiredCount도 내려준다.
+     */
+    @Override
+    public QueueStateV2Response getQueueStateV2(Long userId) {
+        QueueKey queueKey = userQueueMap.get(userId);
+
+        if (queueKey == null) {
+            // userQueueMap에 연결이 없다는 뜻은 이미 queue 단계가 끝났다는 뜻이다.
+            return new QueueStateV2Response(false, null, null, 0, REQUIRED_MATCH_SIZE);
+        }
+
+        Deque<WaitingUser> queue = waitingQueues.get(queueKey);
+
+        if (queue == null) {
+            userQueueMap.remove(userId, queueKey);
+            return new QueueStateV2Response(false, null, null, 0, REQUIRED_MATCH_SIZE);
+        }
+
+        synchronized (queue) {
+            // requiredCount를 함께 내려 프론트가 1/4, 2/4 UI를 바로 만들 수 있게 한다.
+            return new QueueStateV2Response(
+                    true, queueKey.category(), queueKey.difficulty().name(), queue.size(), REQUIRED_MATCH_SIZE);
+        }
+    }
+
+    /**
+     * v2 matches/me 응답 조립을 위한 세션 원본 조회
+     *
+     * 왜 DTO를 여기서 바로 만들지 않나?
+     * -> participant nickname 같은 화면용 정보는 store 책임이 아니라
+     *    서비스 계층에서 회원 정보를 합쳐 만드는 쪽이 더 자연스럽기 때문이다.
+     */
+    @Override
+    public MatchSession findMatchSessionByUserId(Long userId) {
+        Long matchId = userMatchMap.get(userId);
+
+        if (matchId == null) {
+            // queue에서도 빠졌고 match 연결도 없다면 ready-check 대상이 아니다.
+            return null;
+        }
+
+        MatchSession matchSession = matchSessionMap.get(matchId);
+
+        if (matchSession == null) {
+            // user -> match 연결은 남아 있는데 본문이 사라진 경우 조회 시점에 정리한다.
+            cleanupStaleUserMatch(userId, matchId);
+            return null;
+        }
+
+        if (matchSession.isExpiredAt(LocalDateTime.now())) {
+            // 별도 스케줄러 없이 조회 시점에 만료를 반영한다.
+            return expire(matchId);
+        }
+
+        if (matchSession.status() == MatchSessionStatus.CLOSED) {
+            cleanupStaleUserMatch(userId, matchId);
+            return null;
+        }
+
+        return matchSession;
     }
 
     /**
@@ -433,10 +651,13 @@ public class InMemoryMatchStateStore implements MatchStateStore {
         }
 
         if (!roomId.equals(matchSession.roomId())) {
+            // 잘못된 roomId 요청으로 다른 세션 연결이 지워지지 않게 방어한다.
             return;
         }
 
+        // 입장에 성공한 사용자만 세션 참조에서 제거한다.
         userMatchMap.remove(userId, matchId);
+        // 유저 매치맵이 다 삭제되면 그 후에 매칭방삭제
         removeMatchSessionIfUnreferenced(matchId);
     }
 
@@ -451,11 +672,37 @@ public class InMemoryMatchStateStore implements MatchStateStore {
         return waitingQueues.containsKey(queueKey);
     }
 
+    private MatchSession requireMatchSession(Long matchId) {
+        MatchSession matchSession = matchSessionMap.get(matchId);
+
+        if (matchSession == null) {
+            throw new IllegalStateException("존재하지 않는 매치 세션입니다.");
+        }
+
+        return matchSession;
+    }
+
+    private void cleanupEmptyQueue(QueueKey queueKey) {
+        Deque<WaitingUser> queue = waitingQueues.get(queueKey);
+
+        if (queue == null) {
+            return;
+        }
+
+        synchronized (queue) {
+            if (queue.isEmpty()) {
+                // 비어 있는 queue 객체를 제거해 queue/me 조회와 테스트 상태를 깔끔하게 유지한다.
+                waitingQueues.remove(queueKey, queue);
+            }
+        }
+    }
+
     /**
      * userMatchMap에는 연결이 남아 있지만 실제 MatchSession이 없을 때
      * 조회 시점에 해당 사용자의 stale 연결을 정리한다.
      */
     private void cleanupStaleUserMatch(Long userId, Long matchId) {
+        // 본문이 사라진 matchId를 계속 들고 있으면 이후 조회가 꼬이므로 즉시 정리한다.
         userMatchMap.remove(userId, matchId);
         removeMatchSessionIfUnreferenced(matchId);
     }
@@ -470,6 +717,7 @@ public class InMemoryMatchStateStore implements MatchStateStore {
      */
     private void removeMatchSessionIfUnreferenced(Long matchId) {
         if (!userMatchMap.containsValue(matchId)) {
+            // 더 이상 이 matchId를 참조하는 사용자가 없을 때만 세션 본문을 제거한다.
             matchSessionMap.remove(matchId);
         }
     }

@@ -84,6 +84,7 @@ public class MatchingQueueService {
     // 4인 매칭 + 방 생성
     private CreateRoomResponse tryMatchAndCreateRoom(QueueKey queueKey) {
 
+        // 큐에서 4명 빼기
         List<WaitingUser> matchedUsers = matchStateStore.pollMatchCandidates(queueKey, 4);
 
         if (matchedUsers == null) {
