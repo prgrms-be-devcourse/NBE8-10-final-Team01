@@ -55,11 +55,13 @@ public class ProblemService {
         List<ProblemLanguageProfile> languageProfiles =
                 problemLanguageProfileRepository.findByProblemIdOrderByIdAsc(problemId);
 
+        // 언어 프로필을 기반으로 상세 화면의 언어 목록을 구성한다.
         List<String> supportedLanguages = languageProfiles.stream()
                 .map(ProblemLanguageProfile::getLanguageCode)
                 .distinct()
                 .toList();
 
+        // isDefault=true를 우선 사용하고, 없으면 첫 번째 언어를 기본값으로 선택한다.
         String defaultLanguage = languageProfiles.stream()
                 .filter(profile -> Boolean.TRUE.equals(profile.getIsDefault()))
                 .findFirst()
@@ -67,11 +69,13 @@ public class ProblemService {
                 .or(() -> languageProfiles.stream().findFirst().map(ProblemLanguageProfile::getLanguageCode))
                 .orElse(null);
 
+        // 프론트 에디터에서 언어 전환 시 바로 반영할 starter code 목록
         List<ProblemDetailResponse.StarterCode> starterCodes = languageProfiles.stream()
                 .map(profile ->
                         new ProblemDetailResponse.StarterCode(profile.getLanguageCode(), profile.getStarterCode()))
                 .toList();
 
+        // 채점용 hidden 케이스는 제외하고, sample 케이스만 노출한다.
         List<ProblemDetailResponse.SampleCase> sampleCases = problem.getTestCases().stream()
                 .filter(tc -> Boolean.TRUE.equals(tc.getIsSample()))
                 .map(this::toSampleCase)
