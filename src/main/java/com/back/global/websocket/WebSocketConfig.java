@@ -56,7 +56,8 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                             log.info("WebSocket 세션 등록 - sessionId={}, memberId={}", accessor.getSessionId(), memberId);
 
                             // STOMP 세션 Principal 설정 → @AuthenticationPrincipal이 동작하게 함
-                            SecurityUser securityUser = new SecurityUser(memberId, null, null, "ROLE_USER");
+                            SecurityUser securityUser =
+                                    new SecurityUser(memberId, memberId.toString(), null, "ROLE_USER");
                             UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
                                     securityUser, null, securityUser.getAuthorities());
                             MessageHeaderAccessor mutableAccessor = MessageHeaderAccessor.getMutableAccessor(message);

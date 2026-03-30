@@ -45,7 +45,8 @@ import lombok.RequiredArgsConstructor;
 public class ReadyCheckService {
 
     private static final int REQUIRED_MATCH_SIZE = 4;
-    private static final long READY_CHECK_TIMEOUT_SECONDS = 15L;
+    // TODO: 피지컬이슈로 60초로 바꿈, 나중에 15L로 원복해야함
+    private static final long READY_CHECK_TIMEOUT_SECONDS = 60L;
 
     private final BattleRoomService battleRoomService;
     private final QueueProblemPicker queueProblemPicker;
