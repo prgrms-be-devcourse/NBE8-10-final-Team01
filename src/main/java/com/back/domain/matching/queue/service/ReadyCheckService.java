@@ -38,7 +38,7 @@ import lombok.RequiredArgsConstructor;
  * 이 서비스는 "큐에 참가해 4명을 모으는 것" 자체보다
  * "4명이 모인 뒤 수락/거절을 거쳐 ROOM_READY로 가는 상태 전이"를 책임진다.
  *
- * 그래서 기존 MatchingQueueService와 달리
+ * 그래서 큐 진입 자체보다
  * ACCEPT_PENDING, ROOM_READY, EXPIRED, CANCELLED 같은
  * ready-check 전용 상태를 읽고 바꾸는 역할에 집중한다.
  */
@@ -146,6 +146,16 @@ public class ReadyCheckService {
     }
 
     /**
+     * battle room join 성공 후 해당 사용자의 매치 세션 연결을 정리한다.
+     *
+     * v1 매칭 제거 이후에는 별도 v1 서비스가 아니라
+     * ready-check 흐름의 진입점인 이 서비스가 room join 후처리도 함께 맡는다.
+     */
+    public void clearMatchedRoom(Long userId, Long roomId) {
+        matchStateStore.clearMatchedRoom(userId, roomId);
+    }
+
+    /**
      * 4명 충족 시 ACCEPT_PENDING 세션을 만든다.
      *
      * 이 시점에는 아직 problem pick이나 room 생성이 일어나지 않는다.
@@ -195,8 +205,8 @@ public class ReadyCheckService {
 
     private MatchStatus toMatchStatus(MatchSessionStatus status) {
         return switch (status) {
-            // v1 MATCHED와 v2 ROOM_READY는 프론트 관점에선 모두 "방 입장 가능"으로 묶는다.
-            case MATCHED, ROOM_READY -> MatchStatus.ROOM_READY;
+            // ROOM_READY는 프론트 관점에서 바로 방 입장 가능한 상태다.
+            case ROOM_READY -> MatchStatus.ROOM_READY;
             case ACCEPT_PENDING -> MatchStatus.ACCEPT_PENDING;
             case EXPIRED -> MatchStatus.EXPIRED;
             case CANCELLED -> MatchStatus.CANCELLED;

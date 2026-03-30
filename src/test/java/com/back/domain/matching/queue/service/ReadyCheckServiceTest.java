@@ -39,9 +39,6 @@ class ReadyCheckServiceTest {
     private final MemberRepository memberRepository = mock(MemberRepository.class);
     private final MatchStateStore matchStateStore = new InMemoryMatchStateStore();
 
-    private final MatchingQueueService matchingQueueService =
-            new MatchingQueueService(battleRoomService, queueProblemPicker, matchStateStore);
-
     private final ReadyCheckService readyCheckService =
             new ReadyCheckService(battleRoomService, queueProblemPicker, matchStateStore, memberRepository);
 
@@ -196,7 +193,7 @@ class ReadyCheckServiceTest {
         readyCheckService.acceptMatch(3L, matchId);
         readyCheckService.acceptMatch(4L, matchId);
 
-        matchingQueueService.clearMatchedRoom(1L, 100L);
+        readyCheckService.clearMatchedRoom(1L, 100L);
 
         assertThat(readyCheckService.getMyMatchStateV2(1L).status()).isEqualTo(MatchStatus.IDLE);
         assertThat(readyCheckService.getMyMatchStateV2(2L).status()).isEqualTo(MatchStatus.ROOM_READY);

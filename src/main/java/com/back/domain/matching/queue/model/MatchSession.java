@@ -14,10 +14,7 @@ import java.util.Map;
  * 이번 단계에서는 MatchSession을 도입해서
  * 매칭 완료 상태를 유저 단위가 아니라 매치 단위로 저장한다.
  *
- * 현재는 프론트 변경 없이 기존 MATCHED 흐름을 유지하는 단계라
- * roomId가 이미 존재하는 MATCHED 상태만 다룬다.
- *
- * 다만 v2 ready-check를 위해
+ * 현재는 v2 ready-check 흐름을 기준으로
  * queueKey, deadline, participantDecisions 같은 필드를 확장해 두었다.
  * 여기서 participantDecisions를 단일 원본으로 두는 이유는
  * acceptedUserIds 같은 파생 상태를 따로 저장하지 않고도
@@ -53,36 +50,6 @@ public record MatchSession(
         // record로 받은 컬렉션이 바깥에서 수정되지 않도록 방어 복사한다.
         participantIds = List.copyOf(participantIds);
         participantDecisions = Map.copyOf(participantDecisions);
-    }
-
-    /**
-     * 현재 단계에서는 4명 매칭이 끝나고 roomId까지 생성된 시점에만
-     * MatchSession을 만들기 때문에 status=MATCHED, roomId!=null 을 기본 규칙으로 둔다.
-     *
-     * v2 응답에서도 동일 세션을 해석할 수 있도록 participant decision은 전원 ACCEPTED로 둔다.
-     * 즉 방이 이미 만들어진 순간은 ready-check 관점에서도 "전원 수락 완료" 상태로 본다.
-     */
-    public static MatchSession matched(Long matchId, QueueKey queueKey, List<Long> participantIds, Long roomId) {
-        if (roomId == null) {
-            throw new IllegalArgumentException("MATCHED 상태의 roomId는 필수입니다.");
-        }
-
-        Map<Long, ReadyDecision> participantDecisions = new LinkedHashMap<>();
-        for (Long participantId : participantIds) {
-            // v1 MATCHED 세션은 이미 방이 준비된 상태이므로
-            // ready-check 관점에서도 전원 ACCEPTED와 같은 결과 상태로 본다.
-            participantDecisions.put(participantId, ReadyDecision.ACCEPTED);
-        }
-
-        return new MatchSession(
-                matchId,
-                queueKey,
-                participantIds,
-                participantDecisions,
-                MatchSessionStatus.MATCHED,
-                roomId,
-                null,
-                LocalDateTime.now());
     }
 
     /**
@@ -198,8 +165,9 @@ public record MatchSession(
     }
 
     public boolean isAllAccepted() {
-        // 원래 참가자 전원이 ACCEPTED인지 판단한다.
-        return participantIds.stream().allMatch(participantId -> decisionOf(participantId) == ReadyDecision.ACCEPTED);
+        // ready-check의 단일 원본은 participantDecisions 이므로
+        // 전원 수락 여부도 이 decision 값들만 보고 판단한다.
+        return participantDecisions.values().stream().allMatch(decision -> decision == ReadyDecision.ACCEPTED);
     }
 
     public boolean isExpiredAt(LocalDateTime now) {

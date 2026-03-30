@@ -3,8 +3,6 @@ package com.back.domain.matching.queue.store;
 import java.time.LocalDateTime;
 import java.util.List;
 
-import com.back.domain.matching.queue.dto.MatchStateResponse;
-import com.back.domain.matching.queue.dto.QueueStateResponse;
 import com.back.domain.matching.queue.dto.QueueStateV2Response;
 import com.back.domain.matching.queue.model.MatchSession;
 import com.back.domain.matching.queue.model.QueueKey;
@@ -16,9 +14,9 @@ import com.back.domain.matching.queue.model.WaitingUser;
  * 지금은 인메모리 구현체를 사용하지만,
  * 이후 Redis 등으로 교체할 수 있도록 저장 경계를 먼저 만든다.
  *
- * 이번 단계에서는 v1 즉시매칭과 v2 ready-check가 같은 저장소를 공유하되,
- * 외부 계약은 컨트롤러/DTO에서 분리할 수 있도록
- * store 레벨에서는 상태 조작 메서드만 확장한다.
+ * 이번 단계부터는 v2 ready-check 흐름만 이 저장소를 사용하므로,
+ * store는 매칭 상태 원본 조작에만 집중하고
+ * 외부 응답 계약은 컨트롤러/서비스에서 해석한다.
  */
 public interface MatchStateStore {
 
@@ -48,11 +46,6 @@ public interface MatchStateStore {
      * 방 생성 실패 시 poll했던 유저들을 큐로 되돌린다.
      */
     void rollbackPolledUsers(QueueKey queueKey, List<WaitingUser> users);
-
-    /**
-     * 방 생성 성공 시 유저들을 SEARCHING -> MATCHED 상태로 전환한다.
-     */
-    void markMatched(QueueKey queueKey, List<WaitingUser> matchedUsers, Long roomId);
 
     /**
      * v2에서는 4명 매칭 직후 room을 만들지 않고,
@@ -92,16 +85,6 @@ public interface MatchStateStore {
     int getWaitingCount(QueueKey queueKey);
 
     /**
-     * queue/me 응답용 상태 조회
-     */
-    QueueStateResponse getQueueState(Long userId);
-
-    /**
-     * matches/me 응답용 상태 조회
-     */
-    MatchStateResponse getMatchState(Long userId);
-
-    /**
      * v2 queue/me는 SEARCHING UI 전용이므로 requiredCount까지 함께 내려준다.
      */
     QueueStateV2Response getQueueStateV2(Long userId);
@@ -115,12 +98,7 @@ public interface MatchStateStore {
     MatchSession findMatchSessionByUserId(Long userId);
 
     /**
-     * 방 입장 성공 후 matched 상태를 정리한다.
+     * 방 입장 성공 후 room-ready 세션 연결을 정리한다.
      */
     void clearMatchedRoom(Long userId, Long roomId);
-
-    /**
-     * 기존 테스트 호환용
-     */
-    boolean hasQueue(QueueKey queueKey);
 }
