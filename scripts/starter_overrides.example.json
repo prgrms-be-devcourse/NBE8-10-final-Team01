@@ -1,0 +1,13 @@
+{
+  "problem_id": {
+    "9951": {
+      "java": "class Solution {\n    public int solve(int[] nums) {\n        // TODO\n        return 0;\n    }\n}\n",
+      "python3": "class Solution:\n    def solve(self, nums: list[int]) -> int:\n        # TODO\n        return 0\n"
+    }
+  },
+  "source_problem_id": {
+    "852/A": {
+      "java": "class Solution {\n    public int[] twoSum(int[] nums, int target) {\n        return new int[]{};\n    }\n}\n"
+    }
+  }
+}

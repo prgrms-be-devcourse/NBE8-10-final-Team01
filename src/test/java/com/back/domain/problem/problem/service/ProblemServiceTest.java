@@ -16,17 +16,23 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 
+import com.back.domain.problem.languageprofile.entity.ProblemLanguageProfile;
+import com.back.domain.problem.languageprofile.repository.ProblemLanguageProfileRepository;
 import com.back.domain.problem.problem.dto.ProblemDetailResponse;
 import com.back.domain.problem.problem.dto.ProblemListResponse;
 import com.back.domain.problem.problem.entity.Problem;
 import com.back.domain.problem.problem.enums.DifficultyLevel;
 import com.back.domain.problem.problem.repository.ProblemRepository;
+import com.back.domain.problem.testcase.entity.TestCase;
 import com.back.global.exception.ServiceException;
 
 class ProblemServiceTest {
 
     private final ProblemRepository problemRepository = mock(ProblemRepository.class);
-    private final ProblemService problemService = new ProblemService(problemRepository);
+    private final ProblemLanguageProfileRepository problemLanguageProfileRepository =
+            mock(ProblemLanguageProfileRepository.class);
+    private final ProblemService problemService =
+            new ProblemService(problemRepository, problemLanguageProfileRepository);
 
     @Test
     @DisplayName("문제 목록 조회 시 페이지 정보와 요약 목록을 반환한다")
@@ -85,6 +91,11 @@ class ProblemServiceTest {
     void getProblem_returnsProblemDetail() {
         // given
         Problem problem = mock(Problem.class);
+        TestCase sampleCase = mock(TestCase.class);
+        TestCase hiddenCase = mock(TestCase.class);
+        ProblemLanguageProfile pythonProfile = mock(ProblemLanguageProfile.class);
+        ProblemLanguageProfile javaProfile = mock(ProblemLanguageProfile.class);
+
         when(problem.getId()).thenReturn(1L);
         when(problem.getTitle()).thenReturn("A + B");
         when(problem.getDifficulty()).thenReturn(DifficultyLevel.EASY);
@@ -93,8 +104,24 @@ class ProblemServiceTest {
         when(problem.getOutputFormat()).thenReturn("A+B를 출력한다.");
         when(problem.getTimeLimitMs()).thenReturn(1000L);
         when(problem.getMemoryLimitMb()).thenReturn(256L);
+        when(problem.getTestCases()).thenReturn(List.of(sampleCase, hiddenCase));
+
+        when(sampleCase.getIsSample()).thenReturn(true);
+        when(sampleCase.getInput()).thenReturn("1 2");
+        when(sampleCase.getExpectedOutput()).thenReturn("3");
+
+        when(hiddenCase.getIsSample()).thenReturn(false);
+
+        when(pythonProfile.getLanguageCode()).thenReturn("python3");
+        when(pythonProfile.getStarterCode()).thenReturn("print('hello')");
+        when(pythonProfile.getIsDefault()).thenReturn(true);
+        when(javaProfile.getLanguageCode()).thenReturn("java");
+        when(javaProfile.getStarterCode()).thenReturn("class Main {}");
+        when(javaProfile.getIsDefault()).thenReturn(false);
 
         when(problemRepository.findById(1L)).thenReturn(Optional.of(problem));
+        when(problemLanguageProfileRepository.findByProblemIdOrderByIdAsc(1L))
+                .thenReturn(List.of(pythonProfile, javaProfile));
 
         // when
         ProblemDetailResponse response = problemService.getProblem(1L);
@@ -108,6 +135,13 @@ class ProblemServiceTest {
         assertThat(response.outputFormat()).isEqualTo("A+B를 출력한다.");
         assertThat(response.timeLimitMs()).isEqualTo(1000L);
         assertThat(response.memoryLimitMb()).isEqualTo(256L);
+        assertThat(response.supportedLanguages()).containsExactly("python3", "java");
+        assertThat(response.defaultLanguage()).isEqualTo("python3");
+        assertThat(response.starterCodes())
+                .containsExactly(
+                        new ProblemDetailResponse.StarterCode("python3", "print('hello')"),
+                        new ProblemDetailResponse.StarterCode("java", "class Main {}"));
+        assertThat(response.sampleCases()).containsExactly(new ProblemDetailResponse.SampleCase("1 2", "3"));
     }
 
     @Test

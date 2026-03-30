@@ -42,7 +42,20 @@ class ProblemControllerTest {
     void getProblem_returnsServiceResult() {
         // given
         ProblemDetailResponse response = new ProblemDetailResponse(
-                1L, "A + B", "EASY", "두 정수 A, B를 입력받아 합을 출력하시오.", "첫 줄에 A, B가 공백으로 주어진다.", "A+B를 출력한다.", 1000L, 256L);
+                1L,
+                "A + B",
+                "EASY",
+                "두 정수 A, B를 입력받아 합을 출력하시오.",
+                "첫 줄에 A, B가 공백으로 주어진다.",
+                "A+B를 출력한다.",
+                1000L,
+                256L,
+                List.of("python3", "java"),
+                "python3",
+                List.of(
+                        new ProblemDetailResponse.StarterCode("python3", "print('hello')"),
+                        new ProblemDetailResponse.StarterCode("java", "class Main {}")),
+                List.of(new ProblemDetailResponse.SampleCase("1 2", "3")));
         when(problemService.getProblem(1L)).thenReturn(response);
 
         // when
