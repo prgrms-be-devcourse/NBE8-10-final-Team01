@@ -39,16 +39,18 @@ public class BattleDisconnectHandler {
             return;
         }
 
-        battleParticipantRepository.findPlayingParticipantByMemberId(memberId).stream().findFirst().ifPresent(participant -> {
-            Long roomId = participant.getBattleRoom().getId();
+        battleParticipantRepository.findPlayingParticipantByMemberId(memberId).stream()
+                .findFirst()
+                .ifPresent(participant -> {
+                    Long roomId = participant.getBattleRoom().getId();
 
-            participant.abandon();
-            battleParticipantRepository.save(participant);
+                    participant.abandon();
+                    battleParticipantRepository.save(participant);
 
-            log.info("배틀 이탈 처리 - memberId={}, roomId={}", memberId, roomId);
+                    log.info("배틀 이탈 처리 - memberId={}, roomId={}", memberId, roomId);
 
-            messagingTemplate.convertAndSend(
-                    "/topic/room/" + roomId, Map.of("type", "PARTICIPANT_LEFT", "userId", memberId));
-        });
+                    messagingTemplate.convertAndSend(
+                            "/topic/room/" + roomId, Map.of("type", "PARTICIPANT_LEFT", "userId", memberId));
+                });
     }
 }
