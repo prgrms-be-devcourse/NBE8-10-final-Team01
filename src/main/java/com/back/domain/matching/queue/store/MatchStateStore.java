@@ -26,6 +26,12 @@ public interface MatchStateStore {
     record CancelResult(QueueKey queueKey, int waitingCount) {}
 
     /**
+     * room 생성 선점 결과를 서비스 계층에서 해석할 수 있도록
+     * 현재 세션 상태와 이번 요청의 선점 성공 여부를 함께 내려준다.
+     */
+    record RoomCreationAttempt(MatchSession matchSession, boolean acquired) {}
+
+    /**
      * 유저를 큐에 넣고 현재 큐 크기를 반환한다.
      * 이미 같은 유저가 대기 중이면 예외를 던진다.
      */
@@ -63,6 +69,11 @@ public interface MatchStateStore {
      * 특정 참가자의 decision을 DECLINED로 바꾸고 세션 종료 흐름을 시작한다.
      */
     MatchSession decline(Long matchId, Long userId);
+
+    /**
+     * 전원 수락이 끝난 세션에서 room 생성 권한을 한 요청만 선점하도록 시도한다.
+     */
+    RoomCreationAttempt tryBeginRoomCreation(Long matchId);
 
     /**
      * 전원 수락 후 roomId를 세션에 연결하고 ROOM_READY 상태로 전환한다.

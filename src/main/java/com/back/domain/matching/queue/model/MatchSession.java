@@ -118,6 +118,22 @@ public record MatchSession(
                 createdAt);
     }
 
+    /**
+     * 마지막 accept 경쟁 상황에서는 한 요청만 room 생성 권한을 가져가야 하므로
+     * ROOM_READY 직전의 내부 선점 상태를 별도로 둔다.
+     */
+    public MatchSession roomCreating() {
+        return new MatchSession(
+                matchId,
+                queueKey,
+                participantIds,
+                participantDecisions,
+                MatchSessionStatus.ROOM_CREATING,
+                roomId,
+                deadline,
+                createdAt);
+    }
+
     public MatchSession expired() {
         // 누가 어디까지 수락했는지는 프론트가 보여줘야 하므로 decision 정보는 유지한다.
         return new MatchSession(

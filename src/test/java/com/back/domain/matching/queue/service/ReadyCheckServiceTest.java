@@ -10,6 +10,12 @@ import static org.mockito.Mockito.when;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -25,6 +31,7 @@ import com.back.domain.matching.queue.dto.QueueJoinRequest;
 import com.back.domain.matching.queue.dto.QueueStateV2Response;
 import com.back.domain.matching.queue.dto.QueueStatusResponse;
 import com.back.domain.matching.queue.model.Difficulty;
+import com.back.domain.matching.queue.model.MatchSessionStatus;
 import com.back.domain.matching.queue.model.QueueKey;
 import com.back.domain.matching.queue.model.WaitingUser;
 import com.back.domain.matching.queue.store.InMemoryMatchStateStore;
@@ -37,7 +44,7 @@ class ReadyCheckServiceTest {
     private final BattleRoomService battleRoomService = mock(BattleRoomService.class);
     private final QueueProblemPicker queueProblemPicker = mock(QueueProblemPicker.class);
     private final MemberRepository memberRepository = mock(MemberRepository.class);
-    private final MatchStateStore matchStateStore = new InMemoryMatchStateStore();
+    private final InMemoryMatchStateStore matchStateStore = new InMemoryMatchStateStore();
 
     private final ReadyCheckService readyCheckService =
             new ReadyCheckService(battleRoomService, queueProblemPicker, matchStateStore, memberRepository);
@@ -199,6 +206,109 @@ class ReadyCheckServiceTest {
         assertThat(readyCheckService.getMyMatchStateV2(2L).status()).isEqualTo(MatchStatus.ROOM_READY);
         assertThat(readyCheckService.getMyMatchStateV2(3L).status()).isEqualTo(MatchStatus.ROOM_READY);
         assertThat(readyCheckService.getMyMatchStateV2(4L).status()).isEqualTo(MatchStatus.ROOM_READY);
+    }
+
+    @Test
+    @DisplayName("마지막 accept가 동시에 들어와도 room은 한 번만 생성된다")
+    void acceptMatch_createsRoomOnlyOnce_whenLastAcceptsRace() throws Exception {
+        AtomicInteger createRoomCallCount = new AtomicInteger();
+        when(battleRoomService.createRoom(any(CreateRoomRequest.class))).thenAnswer(invocation -> {
+            createRoomCallCount.incrementAndGet();
+            Thread.sleep(200);
+            return new CreateRoomResponse(100L, "WAITING");
+        });
+
+        readyCheckService.joinQueueV2(1L, createRequest("Array", Difficulty.EASY));
+        readyCheckService.joinQueueV2(2L, createRequest("Array", Difficulty.EASY));
+        readyCheckService.joinQueueV2(3L, createRequest("Array", Difficulty.EASY));
+        readyCheckService.joinQueueV2(4L, createRequest("Array", Difficulty.EASY));
+
+        Long matchId = readyCheckService.getMyMatchStateV2(1L).readyCheck().matchId();
+
+        readyCheckService.acceptMatch(1L, matchId);
+        readyCheckService.acceptMatch(2L, matchId);
+
+        CountDownLatch startLatch = new CountDownLatch(1);
+        ExecutorService executorService = Executors.newFixedThreadPool(2);
+
+        try {
+            Future<MatchStateV2Response> user3Future = executorService.submit(() -> {
+                startLatch.await();
+                return readyCheckService.acceptMatch(3L, matchId);
+            });
+            Future<MatchStateV2Response> user4Future = executorService.submit(() -> {
+                startLatch.await();
+                return readyCheckService.acceptMatch(4L, matchId);
+            });
+
+            startLatch.countDown();
+
+            MatchStateV2Response user3Response = user3Future.get(5, TimeUnit.SECONDS);
+            MatchStateV2Response user4Response = user4Future.get(5, TimeUnit.SECONDS);
+            MatchStateV2Response finalState = readyCheckService.getMyMatchStateV2(1L);
+
+            assertThat(createRoomCallCount.get()).isEqualTo(1);
+            assertThat(user3Response.status()).isIn(MatchStatus.ACCEPT_PENDING, MatchStatus.ROOM_READY);
+            assertThat(user4Response.status()).isIn(MatchStatus.ACCEPT_PENDING, MatchStatus.ROOM_READY);
+            assertThat(finalState.status()).isEqualTo(MatchStatus.ROOM_READY);
+            assertThat(finalState.room()).isNotNull();
+            assertThat(finalState.room().roomId()).isEqualTo(100L);
+        } finally {
+            executorService.shutdownNow();
+        }
+    }
+
+    @Test
+    @DisplayName("ROOM_CREATING은 matches/me에서 ACCEPT_PENDING으로만 보인다")
+    void getMyMatchStateV2_hidesRoomCreatingState() {
+        QueueKey queueKey = new QueueKey("Array", Difficulty.EASY);
+        List<WaitingUser> users = List.of(
+                new WaitingUser(1L, queueKey),
+                new WaitingUser(2L, queueKey),
+                new WaitingUser(3L, queueKey),
+                new WaitingUser(4L, queueKey));
+
+        Long matchId = matchStateStore
+                .markAcceptPending(queueKey, users, LocalDateTime.now().plusSeconds(30))
+                .matchId();
+
+        matchStateStore.accept(matchId, 1L);
+        matchStateStore.accept(matchId, 2L);
+        matchStateStore.accept(matchId, 3L);
+        matchStateStore.accept(matchId, 4L);
+        MatchStateStore.RoomCreationAttempt roomCreationAttempt = matchStateStore.tryBeginRoomCreation(matchId);
+
+        MatchStateV2Response response = readyCheckService.getMyMatchStateV2(1L);
+
+        assertThat(roomCreationAttempt.acquired()).isTrue();
+        assertThat(roomCreationAttempt.matchSession().status()).isEqualTo(MatchSessionStatus.ROOM_CREATING);
+        assertThat(response.status()).isEqualTo(MatchStatus.ACCEPT_PENDING);
+        assertThat(response.room()).isNull();
+        assertThat(response.readyCheck()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("이미 ROOM_READY인 세션에 추가 accept가 와도 room은 다시 생성되지 않는다")
+    void acceptMatch_doesNotCreateRoomAgain_whenAlreadyRoomReady() {
+        when(battleRoomService.createRoom(any(CreateRoomRequest.class)))
+                .thenReturn(new CreateRoomResponse(100L, "WAITING"));
+
+        readyCheckService.joinQueueV2(1L, createRequest("Array", Difficulty.EASY));
+        readyCheckService.joinQueueV2(2L, createRequest("Array", Difficulty.EASY));
+        readyCheckService.joinQueueV2(3L, createRequest("Array", Difficulty.EASY));
+        readyCheckService.joinQueueV2(4L, createRequest("Array", Difficulty.EASY));
+
+        Long matchId = readyCheckService.getMyMatchStateV2(1L).readyCheck().matchId();
+
+        readyCheckService.acceptMatch(1L, matchId);
+        readyCheckService.acceptMatch(2L, matchId);
+        readyCheckService.acceptMatch(3L, matchId);
+        readyCheckService.acceptMatch(4L, matchId);
+        MatchStateV2Response response = readyCheckService.acceptMatch(4L, matchId);
+
+        assertThat(response.status()).isEqualTo(MatchStatus.ROOM_READY);
+        assertThat(response.room()).isNotNull();
+        verify(battleRoomService, times(1)).createRoom(any(CreateRoomRequest.class));
     }
 
     private QueueJoinRequest createRequest(String category, Difficulty difficulty) {

@@ -121,7 +121,12 @@ public class ReadyCheckService {
     public MatchStateV2Response acceptMatch(Long userId, Long matchId) {
         MatchSession matchSession = matchStateStore.accept(matchId, userId);
 
-        if (matchSession.status() == MatchSessionStatus.ACCEPT_PENDING && matchSession.isAllAccepted()) {
+        MatchStateStore.RoomCreationAttempt roomCreationAttempt = matchStateStore.tryBeginRoomCreation(matchId);
+        matchSession = roomCreationAttempt.matchSession();
+
+        if (roomCreationAttempt.acquired()) {
+            // 마지막 accept 경쟁 상황에서도 room 생성은 이 요청만 수행한다.
+            // 선점을 못 한 동시 요청은 현재 세션 상태만 그대로 응답으로 돌려준다.
             // 방 생성 시점을 마지막 accept로 미루는 이유는,
             // 수락하지 않은 매치에 불필요한 방이 만들어지지 않도록 하기 위해서다.
             try {
@@ -207,7 +212,8 @@ public class ReadyCheckService {
         return switch (status) {
             // ROOM_READY는 프론트 관점에서 바로 방 입장 가능한 상태다.
             case ROOM_READY -> MatchStatus.ROOM_READY;
-            case ACCEPT_PENDING -> MatchStatus.ACCEPT_PENDING;
+            // ROOM_CREATING은 room 생성 중인 내부 상태일 뿐이라 프론트에는 노출하지 않는다.
+            case ACCEPT_PENDING, ROOM_CREATING -> MatchStatus.ACCEPT_PENDING;
             case EXPIRED -> MatchStatus.EXPIRED;
             case CANCELLED -> MatchStatus.CANCELLED;
             case CLOSED -> MatchStatus.IDLE;
