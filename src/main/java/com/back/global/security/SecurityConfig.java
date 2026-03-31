@@ -35,10 +35,10 @@ public class SecurityConfig {
                                 "/api/v1/members/join",
                                 "/api/v1/members/login",
                                 // 로그아웃은 인증 없이도 호출 가능해야 함
-                                "/api/v1/members/logout",
-                                // TODO: WebSocket 핸드셰이크는 permitAll 필요하나, STOMP ChannelInterceptor로 인증 강제 필요
-                                "/ws/**")
+                                "/api/v1/members/logout")
                         .permitAll()
+                        // /ws/** 는 별도 permitAll 제거: JwtAuthenticationFilter가 HTTP 업그레이드 요청에서
+                        // JWT 쿠키를 검증하므로, 미인증 요청은 WebSocket 핸드셰이크 전에 401로 차단됨
                         // 그 외 모든 요청은 인증 필요
                         .anyRequest()
                         .authenticated())
