@@ -29,7 +29,7 @@ public interface MatchStateStore {
      * 유저를 큐에 넣고 현재 큐 크기를 반환한다.
      * 이미 같은 유저가 대기 중이면 예외를 던진다.
      */
-    int enqueue(Long userId, QueueKey queueKey);
+    int enqueue(Long userId, String nickname, QueueKey queueKey);
 
     /**
      * SEARCHING 상태 유저를 큐에서 제거한다.

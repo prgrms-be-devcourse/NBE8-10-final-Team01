@@ -26,6 +26,12 @@ public record MatchSession(
         // 이 매치에 원래 묶인 참가자 원본 목록이다.
         // ready-check 진행 중에도 이 목록 자체는 바뀌지 않는다.
         List<Long> participantIds,
+        /**
+         * join 시점 nickname snapshot을 세션에 함께 저장한다.
+         * 예: participantIds = [1,2,3,4], participantNicknames = {1:"m1", 2:"m2", 3:"m3", 4:"m4"}
+         * participantIds 는 room 생성과 응답 순서를 위해 유지하고, nickname 은 이 snapshot map 에서 읽는다.
+         */
+        Map<Long, String> participantNicknames,
         // ready-check의 단일 상태 원본이다.
         // 누가 ACCEPTED / PENDING / DECLINED 인지는 여기만 보면 된다.
         Map<Long, ReadyDecision> participantDecisions,
@@ -43,12 +49,17 @@ public record MatchSession(
             throw new IllegalArgumentException("participantIds는 비어 있을 수 없습니다.");
         }
 
+        if (participantNicknames == null || participantNicknames.isEmpty()) {
+            throw new IllegalArgumentException("participantNicknames 는 비어 있을 수 없습니다.");
+        }
+
         if (participantDecisions == null || participantDecisions.isEmpty()) {
             throw new IllegalArgumentException("participantDecisions는 비어 있을 수 없습니다.");
         }
 
         // record로 받은 컬렉션이 바깥에서 수정되지 않도록 방어 복사한다.
         participantIds = List.copyOf(participantIds);
+        participantNicknames = Map.copyOf(participantNicknames);
         participantDecisions = Map.copyOf(participantDecisions);
     }
 
@@ -59,7 +70,11 @@ public record MatchSession(
      * 먼저 ACCEPT_PENDING 세션을 만든 뒤 각 참가자의 수락 여부를 기다린다.
      */
     public static MatchSession acceptPending(
-            Long matchId, QueueKey queueKey, List<Long> participantIds, LocalDateTime deadline) {
+            Long matchId,
+            QueueKey queueKey,
+            List<Long> participantIds,
+            Map<Long, String> participantNicknames,
+            LocalDateTime deadline) {
         if (deadline == null) {
             throw new IllegalArgumentException("ready-check 세션은 deadline이 필요합니다.");
         }
@@ -74,6 +89,7 @@ public record MatchSession(
                 matchId,
                 queueKey,
                 participantIds,
+                participantNicknames,
                 participantDecisions,
                 MatchSessionStatus.ACCEPT_PENDING,
                 null,
@@ -95,7 +111,15 @@ public record MatchSession(
         updatedDecisions.put(userId, decision);
 
         return new MatchSession(
-                matchId, queueKey, participantIds, updatedDecisions, status, roomId, deadline, createdAt);
+                matchId,
+                queueKey,
+                participantIds,
+                participantNicknames,
+                updatedDecisions,
+                status,
+                roomId,
+                deadline,
+                createdAt);
     }
 
     /**
@@ -111,6 +135,7 @@ public record MatchSession(
                 matchId,
                 queueKey,
                 participantIds,
+                participantNicknames,
                 participantDecisions,
                 MatchSessionStatus.ROOM_READY,
                 roomId,
@@ -124,6 +149,7 @@ public record MatchSession(
                 matchId,
                 queueKey,
                 participantIds,
+                participantNicknames,
                 participantDecisions,
                 MatchSessionStatus.EXPIRED,
                 roomId,
@@ -137,6 +163,7 @@ public record MatchSession(
                 matchId,
                 queueKey,
                 participantIds,
+                participantNicknames,
                 participantDecisions,
                 MatchSessionStatus.CANCELLED,
                 roomId,

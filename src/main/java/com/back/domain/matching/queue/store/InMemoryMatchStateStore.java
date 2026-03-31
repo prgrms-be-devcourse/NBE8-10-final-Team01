@@ -3,6 +3,7 @@ package com.back.domain.matching.queue.store;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -117,7 +118,7 @@ public class InMemoryMatchStateStore implements MatchStateStore {
      *    add + size 같은 복합 로직은 한 덩어리로 묶어야 일관성이 맞기 때문이다.
      */
     @Override
-    public int enqueue(Long userId, QueueKey queueKey) {
+    public int enqueue(Long userId, String nickname, QueueKey queueKey) {
         if (userQueueMap.putIfAbsent(userId, queueKey) != null) {
             throw new IllegalStateException("이미 매칭 대기열에 참가 중인 사용자입니다.");
         }
@@ -125,7 +126,7 @@ public class InMemoryMatchStateStore implements MatchStateStore {
         Deque<WaitingUser> queue = waitingQueues.computeIfAbsent(queueKey, key -> new ConcurrentLinkedDeque<>());
 
         synchronized (queue) {
-            queue.addLast(new WaitingUser(userId, queueKey));
+            queue.addLast(new WaitingUser(userId, nickname, queueKey));
             return queue.size();
         }
     }
@@ -283,8 +284,14 @@ public class InMemoryMatchStateStore implements MatchStateStore {
         // 세션 본문에는 결국 userId 목록만 남기면 되므로 여기서 변환한다.
         List<Long> participantIds =
                 matchedUsers.stream().map(WaitingUser::getUserId).toList();
+        // participantIds 는 기존처럼 room 생성 요청과 응답 순서를 고정하는 용도로 유지한다.
+        // nickname snapshot 은 같은 userId 키로 묶어서 matches/me 가 DB 조회 없이 참가자 목록을 조립하게 한다.
+        // 예: participantIds = [1,2,3,4], participantNicknames = {1:"m1", 2:"m2", 3:"m3", 4:"m4"}
+        Map<Long, String> participantNicknames = new LinkedHashMap<>();
+        matchedUsers.forEach(user -> participantNicknames.put(user.getUserId(), user.getNickname()));
 
-        MatchSession matchSession = MatchSession.acceptPending(matchId, queueKey, participantIds, deadline);
+        MatchSession matchSession =
+                MatchSession.acceptPending(matchId, queueKey, participantIds, participantNicknames, deadline);
 
         // 세션 본문을 먼저 저장한 뒤
         // user -> match 연결을 만든다.
