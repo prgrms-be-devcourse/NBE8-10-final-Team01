@@ -69,6 +69,7 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.batch:spring-batch-test")
     testImplementation("org.springframework.security:spring-security-test")
+    implementation("org.springframework.security:spring-security-messaging")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 
     // Auth

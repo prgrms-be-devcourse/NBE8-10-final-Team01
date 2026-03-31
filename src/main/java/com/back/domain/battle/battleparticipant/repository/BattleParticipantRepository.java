@@ -67,5 +67,5 @@ public interface BattleParticipantRepository extends JpaRepository<BattlePartici
                       and p.status = com.back.domain.battle.battleparticipant.entity.BattleParticipantStatus.PLAYING
                       and r.status = com.back.domain.battle.battleroom.entity.BattleRoomStatus.PLAYING
                     """)
-    Optional<BattleParticipant> findPlayingParticipantByMemberId(@Param("memberId") Long memberId);
+    List<BattleParticipant> findPlayingParticipantByMemberId(@Param("memberId") Long memberId);
 }

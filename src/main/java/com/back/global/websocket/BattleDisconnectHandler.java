@@ -39,7 +39,7 @@ public class BattleDisconnectHandler {
             return;
         }
 
-        battleParticipantRepository.findPlayingParticipantByMemberId(memberId).ifPresent(participant -> {
+        battleParticipantRepository.findPlayingParticipantByMemberId(memberId).stream().findFirst().ifPresent(participant -> {
             Long roomId = participant.getBattleRoom().getId();
 
             participant.abandon();
