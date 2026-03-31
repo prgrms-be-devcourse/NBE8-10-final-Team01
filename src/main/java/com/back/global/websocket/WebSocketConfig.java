@@ -21,22 +21,33 @@ import org.springframework.web.socket.config.annotation.WebSocketTransportRegist
 
 import com.back.global.security.SecurityUser;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @Configuration
 @EnableWebSocketMessageBroker
+@RequiredArgsConstructor
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
+    private final WsTokenStore wsTokenStore;
+
     /**
-     * STOMP 메시지가 핸들러로 전달되기 전에 실행되는 인바운드 채널 인터셉터 등록.
+     * STOMP 메시지 인바운드 채널 인터셉터 등록.
      *
-     * <p>인증 흐름:
-     * 1. JwtAuthenticationFilter가 HTTP 핸드셰이크 요청(GET /ws)에서 JWT 쿠키를 검증하고 SecurityContext에 등록
-     * 2. Spring의 DefaultHandshakeHandler가 SecurityContext의 Principal을 WebSocket 세션에 자동 전파
-     * 3. STOMP CONNECT 도달 시점에 accessor.getUser()로 인증된 Principal을 바로 조회 가능
+     * <p>STOMP CONNECT 시 두 가지 인증 방식을 순서대로 시도:
      *
-     * <p>따라서 JwtHandshakeInterceptor(JWT 재파싱)와 WebSocketSessionRegistry(수동 세션 관리)는 불필요하여 제거됨.
+     * <p>① 쿠키 기반 (로컬 환경):
+     *    - JwtAuthenticationFilter가 HTTP 핸드셰이크 요청에서 JWT 쿠키를 검증
+     *    - Spring의 DefaultHandshakeHandler가 SecurityContext의 Principal을 WebSocket 세션에 자동 전파
+     *    - STOMP CONNECT 도달 시 accessor.getUser()로 이미 인증된 Principal 조회 가능
+     *    - 별도 토큰 발급 불필요
+     *
+     * <p>② 1회용 토큰 기반 (배포 환경):
+     *    - cross-origin 환경에서는 SameSite 쿠키 정책으로 쿠키 자동 전송 불가
+     *    - 클라이언트가 POST /api/v1/ws/token으로 토큰을 발급받아 STOMP CONNECT 헤더에 포함
+     *    - ChannelInterceptor가 X-WS-Token 헤더에서 토큰을 꺼내 Redis에서 검증
+     *    - 검증 성공 시 SecurityUser를 생성해 STOMP Principal로 등록, Redis에서 토큰 즉시 삭제
      */
     @Override
     public void configureClientInboundChannel(ChannelRegistration registration) {
@@ -47,16 +58,35 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                 if (accessor == null) return message;
 
                 if (StompCommand.CONNECT.equals(accessor.getCommand())) {
-                    // Spring이 핸드셰이크 시점에 전파한 Principal 조회
-                    // SecurityConfig에서 /ws/**를 authenticated()로 설정했으므로
-                    // 여기 도달한 요청은 이미 JwtAuthenticationFilter를 통과한 인증된 사용자
                     Principal principal = accessor.getUser();
-                    if (principal instanceof UsernamePasswordAuthenticationToken auth
-                            && auth.getPrincipal() instanceof SecurityUser user) {
-                        log.info("WebSocket 연결 - memberId={}", user.getId());
+
+                    if (principal instanceof UsernamePasswordAuthenticationToken cookieAuth
+                            && cookieAuth.getPrincipal() instanceof SecurityUser cookieUser) {
+                        // ① 쿠키 기반: Spring이 이미 Principal을 전파해둔 상태
+                        log.info("WebSocket 연결 (쿠키 인증) - memberId={}", cookieUser.getId());
+
                     } else {
-                        // 정상적이라면 이 경로에 진입하지 않음 (방어적 로그)
-                        log.warn("WebSocket 연결 - 인증 정보 없음 (SecurityConfig의 /ws/** 인증 설정 확인 필요)");
+                        // ② 1회용 토큰 기반: STOMP 헤더에서 토큰 추출 후 Redis 검증
+                        String token = accessor.getFirstNativeHeader("X-WS-Token");
+
+                        if (token == null) {
+                            // 쿠키도 없고 토큰도 없음 → 연결 거부
+                            log.warn("WebSocket 연결 거부 - 인증 정보 없음 (쿠키/토큰 모두 없음)");
+                            return null;
+                        }
+
+                        SecurityUser tokenUser = wsTokenStore.resolve(token);
+                        if (tokenUser == null) {
+                            // 만료되었거나 이미 사용된 토큰 → 연결 거부
+                            log.warn("WebSocket 연결 거부 - 유효하지 않거나 만료된 토큰");
+                            return null;
+                        }
+
+                        // 검증 성공: SecurityUser를 STOMP Principal로 등록
+                        UsernamePasswordAuthenticationToken auth =
+                                new UsernamePasswordAuthenticationToken(tokenUser, null, tokenUser.getAuthorities());
+                        accessor.setUser(auth);
+                        log.info("WebSocket 연결 (토큰 인증) - memberId={}", tokenUser.getId());
                     }
                 }
 
@@ -95,9 +125,6 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint("/ws")
                 .setAllowedOriginPatterns("*")
-                // JwtHandshakeInterceptor 제거:
-                // JwtAuthenticationFilter가 HTTP 핸드셰이크 요청에서 JWT 쿠키를 이미 검증하므로
-                // 핸드셰이크 인터셉터에서 JWT를 재파싱할 필요 없음
                 .withSockJS();
     }
 }
