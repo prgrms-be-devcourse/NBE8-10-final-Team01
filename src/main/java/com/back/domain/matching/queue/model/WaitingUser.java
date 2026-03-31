@@ -14,6 +14,12 @@ public class WaitingUser {
     private final Long userId;
 
     /**
+     * ready-check 응답에서 회원 정보를 다시 조회하지 않도록 join 시점 nickname snapshot을 함께 보관한다.
+     * 예: WaitingUser(1L, "m1", (DP, EASY)) 이면 이후 matches/me 에서도 "m1"을 그대로 쓸 수 있다.
+     */
+    private final String nickname;
+
+    /**
      * 사용자가 어떤 조건의 큐에 들어갔는지 나타내는 값
      * 예: (ARRAY, EASY)
      */
@@ -35,8 +41,9 @@ public class WaitingUser {
      *
      * joinedAt은 객체가 생성되는 현재 시각으로 자동 저장한다.
      */
-    public WaitingUser(Long userId, QueueKey queueKey) {
+    public WaitingUser(Long userId, String nickname, QueueKey queueKey) {
         this.userId = userId;
+        this.nickname = nickname;
         this.queueKey = queueKey;
         this.joinedAt = LocalDateTime.now();
     }
@@ -44,6 +51,10 @@ public class WaitingUser {
     // 대기 중인 사용자의 ID 반환
     public Long getUserId() {
         return userId;
+    }
+
+    public String getNickname() {
+        return nickname;
     }
 
     // 사용자가 속한 큐 정보 반환

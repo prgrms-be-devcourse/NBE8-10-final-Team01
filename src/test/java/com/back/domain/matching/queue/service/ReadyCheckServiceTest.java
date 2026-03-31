@@ -36,34 +36,25 @@ import com.back.domain.matching.queue.model.QueueKey;
 import com.back.domain.matching.queue.model.WaitingUser;
 import com.back.domain.matching.queue.store.InMemoryMatchStateStore;
 import com.back.domain.matching.queue.store.MatchStateStore;
-import com.back.domain.member.member.entity.Member;
-import com.back.domain.member.member.repository.MemberRepository;
 
 class ReadyCheckServiceTest {
 
     private final BattleRoomService battleRoomService = mock(BattleRoomService.class);
     private final QueueProblemPicker queueProblemPicker = mock(QueueProblemPicker.class);
-    private final MemberRepository memberRepository = mock(MemberRepository.class);
     private final InMemoryMatchStateStore matchStateStore = new InMemoryMatchStateStore();
 
     private final ReadyCheckService readyCheckService =
-            new ReadyCheckService(battleRoomService, queueProblemPicker, matchStateStore, memberRepository);
+            new ReadyCheckService(battleRoomService, queueProblemPicker, matchStateStore);
 
     @BeforeEach
     void setUp() {
         when(queueProblemPicker.pick(any(QueueKey.class), anyList())).thenReturn(1L);
-        when(memberRepository.findAllById(anyList())).thenAnswer(invocation -> {
-            List<Long> ids = invocation.getArgument(0);
-            return ids.stream()
-                    .map(id -> Member.of(id, "user" + id + "@test.com", "user" + id))
-                    .toList();
-        });
     }
 
     @Test
     @DisplayName("v2 queue/me는 SEARCHING 동안 waitingCount와 requiredCount를 반환한다")
     void getMyQueueStateV2_returnsSearchingInfo() {
-        QueueStatusResponse response = readyCheckService.joinQueueV2(1L, createRequest("Array", Difficulty.EASY));
+        QueueStatusResponse response = joinUser(1L);
 
         QueueStateV2Response queueState = readyCheckService.getMyQueueStateV2(1L);
 
@@ -78,10 +69,10 @@ class ReadyCheckServiceTest {
     @Test
     @DisplayName("4명이 모이면 v2 matches/me는 ACCEPT_PENDING을 반환한다")
     void getMyMatchStateV2_returnsAcceptPending_whenFourthUserJoins() {
-        readyCheckService.joinQueueV2(1L, createRequest("Array", Difficulty.EASY));
-        readyCheckService.joinQueueV2(2L, createRequest("Array", Difficulty.EASY));
-        readyCheckService.joinQueueV2(3L, createRequest("Array", Difficulty.EASY));
-        QueueStatusResponse fourthResponse = readyCheckService.joinQueueV2(4L, createRequest("Array", Difficulty.EASY));
+        joinUser(1L);
+        joinUser(2L);
+        joinUser(3L);
+        QueueStatusResponse fourthResponse = joinUser(4L);
 
         MatchStateV2Response response = readyCheckService.getMyMatchStateV2(1L);
 
@@ -94,6 +85,9 @@ class ReadyCheckServiceTest {
         assertThat(response.readyCheck().requiredCount()).isEqualTo(4);
         assertThat(response.readyCheck().acceptedByMe()).isFalse();
         assertThat(response.readyCheck().participants()).hasSize(4);
+        assertThat(response.readyCheck().participants())
+                .extracting(participant -> participant.nickname())
+                .containsExactly("m1", "m2", "m3", "m4");
     }
 
     @Test
@@ -102,10 +96,10 @@ class ReadyCheckServiceTest {
         when(battleRoomService.createRoom(any(CreateRoomRequest.class)))
                 .thenReturn(new CreateRoomResponse(100L, "WAITING"));
 
-        readyCheckService.joinQueueV2(1L, createRequest("Array", Difficulty.EASY));
-        readyCheckService.joinQueueV2(2L, createRequest("Array", Difficulty.EASY));
-        readyCheckService.joinQueueV2(3L, createRequest("Array", Difficulty.EASY));
-        readyCheckService.joinQueueV2(4L, createRequest("Array", Difficulty.EASY));
+        joinUser(1L);
+        joinUser(2L);
+        joinUser(3L);
+        joinUser(4L);
 
         Long matchId = readyCheckService.getMyMatchStateV2(1L).readyCheck().matchId();
 
@@ -124,10 +118,10 @@ class ReadyCheckServiceTest {
     @Test
     @DisplayName("한 명이라도 거절하면 세션 전체가 CANCELLED로 종료된다")
     void declineMatch_returnsCancelled() {
-        readyCheckService.joinQueueV2(1L, createRequest("Array", Difficulty.EASY));
-        readyCheckService.joinQueueV2(2L, createRequest("Array", Difficulty.EASY));
-        readyCheckService.joinQueueV2(3L, createRequest("Array", Difficulty.EASY));
-        readyCheckService.joinQueueV2(4L, createRequest("Array", Difficulty.EASY));
+        joinUser(1L);
+        joinUser(2L);
+        joinUser(3L);
+        joinUser(4L);
 
         Long matchId = readyCheckService.getMyMatchStateV2(1L).readyCheck().matchId();
 
@@ -147,10 +141,10 @@ class ReadyCheckServiceTest {
     void getMyMatchStateV2_returnsExpired_whenDeadlinePassed() {
         QueueKey queueKey = new QueueKey("Array", Difficulty.EASY);
         List<WaitingUser> users = List.of(
-                new WaitingUser(1L, queueKey),
-                new WaitingUser(2L, queueKey),
-                new WaitingUser(3L, queueKey),
-                new WaitingUser(4L, queueKey));
+                new WaitingUser(1L, "m1", queueKey),
+                new WaitingUser(2L, "m2", queueKey),
+                new WaitingUser(3L, "m3", queueKey),
+                new WaitingUser(4L, "m4", queueKey));
 
         matchStateStore.markAcceptPending(queueKey, users, LocalDateTime.now().minusSeconds(1));
 
@@ -161,15 +155,15 @@ class ReadyCheckServiceTest {
     }
 
     @Test
-    @DisplayName("방 생성이 실패하면 CANCELLED 상태와 실패 메시지를 반환한다")
+    @DisplayName("방 생성에 실패하면 CANCELLED 상태와 실패 메시지를 반환한다")
     void acceptMatch_returnsCancelled_whenCreateRoomFails() {
         when(battleRoomService.createRoom(any(CreateRoomRequest.class)))
                 .thenThrow(new RuntimeException("room create failed"));
 
-        readyCheckService.joinQueueV2(1L, createRequest("Array", Difficulty.EASY));
-        readyCheckService.joinQueueV2(2L, createRequest("Array", Difficulty.EASY));
-        readyCheckService.joinQueueV2(3L, createRequest("Array", Difficulty.EASY));
-        readyCheckService.joinQueueV2(4L, createRequest("Array", Difficulty.EASY));
+        joinUser(1L);
+        joinUser(2L);
+        joinUser(3L);
+        joinUser(4L);
 
         Long matchId = readyCheckService.getMyMatchStateV2(1L).readyCheck().matchId();
 
@@ -188,10 +182,10 @@ class ReadyCheckServiceTest {
         when(battleRoomService.createRoom(any(CreateRoomRequest.class)))
                 .thenReturn(new CreateRoomResponse(100L, "WAITING"));
 
-        readyCheckService.joinQueueV2(1L, createRequest("Array", Difficulty.EASY));
-        readyCheckService.joinQueueV2(2L, createRequest("Array", Difficulty.EASY));
-        readyCheckService.joinQueueV2(3L, createRequest("Array", Difficulty.EASY));
-        readyCheckService.joinQueueV2(4L, createRequest("Array", Difficulty.EASY));
+        joinUser(1L);
+        joinUser(2L);
+        joinUser(3L);
+        joinUser(4L);
 
         Long matchId = readyCheckService.getMyMatchStateV2(1L).readyCheck().matchId();
 
@@ -218,10 +212,10 @@ class ReadyCheckServiceTest {
             return new CreateRoomResponse(100L, "WAITING");
         });
 
-        readyCheckService.joinQueueV2(1L, createRequest("Array", Difficulty.EASY));
-        readyCheckService.joinQueueV2(2L, createRequest("Array", Difficulty.EASY));
-        readyCheckService.joinQueueV2(3L, createRequest("Array", Difficulty.EASY));
-        readyCheckService.joinQueueV2(4L, createRequest("Array", Difficulty.EASY));
+        joinUser(1L);
+        joinUser(2L);
+        joinUser(3L);
+        joinUser(4L);
 
         Long matchId = readyCheckService.getMyMatchStateV2(1L).readyCheck().matchId();
 
@@ -263,10 +257,10 @@ class ReadyCheckServiceTest {
     void getMyMatchStateV2_hidesRoomCreatingState() {
         QueueKey queueKey = new QueueKey("Array", Difficulty.EASY);
         List<WaitingUser> users = List.of(
-                new WaitingUser(1L, queueKey),
-                new WaitingUser(2L, queueKey),
-                new WaitingUser(3L, queueKey),
-                new WaitingUser(4L, queueKey));
+                new WaitingUser(1L, "m1", queueKey),
+                new WaitingUser(2L, "m2", queueKey),
+                new WaitingUser(3L, "m3", queueKey),
+                new WaitingUser(4L, "m4", queueKey));
 
         Long matchId = matchStateStore
                 .markAcceptPending(queueKey, users, LocalDateTime.now().plusSeconds(30))
@@ -293,10 +287,10 @@ class ReadyCheckServiceTest {
         when(battleRoomService.createRoom(any(CreateRoomRequest.class)))
                 .thenReturn(new CreateRoomResponse(100L, "WAITING"));
 
-        readyCheckService.joinQueueV2(1L, createRequest("Array", Difficulty.EASY));
-        readyCheckService.joinQueueV2(2L, createRequest("Array", Difficulty.EASY));
-        readyCheckService.joinQueueV2(3L, createRequest("Array", Difficulty.EASY));
-        readyCheckService.joinQueueV2(4L, createRequest("Array", Difficulty.EASY));
+        joinUser(1L);
+        joinUser(2L);
+        joinUser(3L);
+        joinUser(4L);
 
         Long matchId = readyCheckService.getMyMatchStateV2(1L).readyCheck().matchId();
 
@@ -313,5 +307,9 @@ class ReadyCheckServiceTest {
 
     private QueueJoinRequest createRequest(String category, Difficulty difficulty) {
         return new QueueJoinRequest(category, difficulty);
+    }
+
+    private QueueStatusResponse joinUser(Long userId) {
+        return readyCheckService.joinQueueV2(userId, "m" + userId, createRequest("Array", Difficulty.EASY));
     }
 }
