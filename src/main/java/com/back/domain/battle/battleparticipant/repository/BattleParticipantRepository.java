@@ -59,13 +59,16 @@ public interface BattleParticipantRepository extends JpaRepository<BattlePartici
      * - r.status = PLAYING — 이미 끝난 방(FINISHED)의 참여자는 건드리지 않음
      * join fetch p.battleRoom 을 쓰는 이유는
      * 핸들러에서 participant.getBattleRoom().getId()를 호출할 때 N+1 문제 방지
+     *
+     * DB의 partial unique index(uq_one_playing_per_member)가 동시에 2개 이상의 PLAYING 참여자를
+     * 방지하므로 결과는 항상 0개 또는 1개. 2개 이상이면 IncorrectResultSizeDataAccessException 발생.
      */
     @Query("""
-                    select p from BattleParticipant p
-                    join fetch p.battleRoom r
-                    where p.member.id = :memberId
-                      and p.status = com.back.domain.battle.battleparticipant.entity.BattleParticipantStatus.PLAYING
-                      and r.status = com.back.domain.battle.battleroom.entity.BattleRoomStatus.PLAYING
-                    """)
-    List<BattleParticipant> findPlayingParticipantByMemberId(@Param("memberId") Long memberId);
+            select p from BattleParticipant p
+            join fetch p.battleRoom r
+            where p.member.id = :memberId
+              and p.status = com.back.domain.battle.battleparticipant.entity.BattleParticipantStatus.PLAYING
+              and r.status = com.back.domain.battle.battleroom.entity.BattleRoomStatus.PLAYING
+            """)
+    Optional<BattleParticipant> findPlayingParticipantByMemberId(@Param("memberId") Long memberId);
 }
