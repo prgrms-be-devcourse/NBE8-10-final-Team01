@@ -17,6 +17,7 @@ import com.back.domain.matching.queue.model.MatchSessionStatus;
 import com.back.domain.matching.queue.model.QueueKey;
 import com.back.domain.matching.queue.model.ReadyDecision;
 import com.back.domain.matching.queue.model.WaitingUser;
+import com.back.global.exception.ServiceException;
 
 /**
  * 현재 MVP용 인메모리 매칭 상태 저장소
@@ -118,8 +119,13 @@ public class InMemoryMatchStateStore implements MatchStateStore {
      */
     @Override
     public int enqueue(Long userId, QueueKey queueKey) {
+        // join 시에는 queue 중복 여부만 볼 게 아니라, 기존 match session 연결도 먼저 확인해야 한다.
+        // active session이면 재join을 막고, terminal/stale session이면 현재 사용자 링크만 정리한 뒤 진행한다.
+        // TODO : 근데 이걸 join 쪽에서 들고 있는게 맞는건지에 대한 의문
+        ensureJoinEligibility(userId);
+
         if (userQueueMap.putIfAbsent(userId, queueKey) != null) {
-            throw new IllegalStateException("이미 매칭 대기열에 참가 중인 사용자입니다.");
+            throw new ServiceException("409-1", "이미 매칭 대기열에 참가 중인 사용자입니다.");
         }
 
         Deque<WaitingUser> queue = waitingQueues.computeIfAbsent(queueKey, key -> new ConcurrentLinkedDeque<>());
@@ -569,6 +575,38 @@ public class InMemoryMatchStateStore implements MatchStateStore {
         return matchSession;
     }
 
+    /**
+     * queue 재진입 전 현재 사용자의 기존 match session 연결을 먼저 확인한다.
+     *
+     * active session은 보호해야 하므로 재join을 차단하고,
+     * terminal/stale session만 현재 사용자 기준으로 정리한 뒤 새 queue 참가를 허용한다.
+     */
+    private void ensureJoinEligibility(Long userId) {
+        Long matchId = userMatchMap.get(userId);
+
+        if (matchId == null) {
+            return;
+        }
+
+        MatchSession matchSession = matchSessionMap.get(matchId);
+
+        if (matchSession == null) {
+            // userMatchMap에는 연결이 남아 있지만 세션 본문이 이미 없는 경우다.
+            // 이건 "종료 상태를 보여줄 세션"조차 없어진 stale link라서 현재 사용자 연결만 바로 정리한다.
+            cleanupStaleUserMatch(userId, matchId);
+            return;
+        }
+
+        switch (matchSession.status()) {
+            case ACCEPT_PENDING, ROOM_READY -> throw new ServiceException("409-1", "이미 진행 중인 매칭이 있습니다.");
+            case CANCELLED, EXPIRED, CLOSED -> {
+                // terminal session은 본문이 아직 남아 있으므로 다른 참가자는 계속 matches/me로 종료 상태를 볼 수 있다.
+                // 따라서 세션 전체를 지우지 않고, 다시 join을 누른 현재 사용자 링크만 정리한 뒤 재참가를 허용한다.
+                cleanupTerminalUserMatch(userId, matchId);
+            }
+        }
+    }
+
     private void cleanupEmptyQueue(QueueKey queueKey) {
         Deque<WaitingUser> queue = waitingQueues.get(queueKey);
 
@@ -590,6 +628,19 @@ public class InMemoryMatchStateStore implements MatchStateStore {
      */
     private void cleanupStaleUserMatch(Long userId, Long matchId) {
         // 본문이 사라진 matchId를 계속 들고 있으면 이후 조회가 꼬이므로 즉시 정리한다.
+        // 여기서는 이미 세션 본문이 없기 때문에 "누구에게 종료 상태를 보여줄지"를 고려할 필요가 없다.
+        userMatchMap.remove(userId, matchId);
+        removeMatchSessionIfUnreferenced(matchId);
+    }
+
+    /**
+     * terminal session은 matches/me에서 계속 보여줘야 하므로 세션 전체를 즉시 지우지 않는다.
+     * 다시 join을 시도한 현재 사용자만 기존 match 연결에서 분리하고,
+     * 마지막 참조자까지 빠졌을 때만 세션 본문이 제거되게 한다.
+     */
+    private void cleanupTerminalUserMatch(Long userId, Long matchId) {
+        // terminal session은 본문이 살아 있으므로 종료 모달 용도로 아직 의미가 있다.
+        // 그래서 join을 다시 누른 현재 사용자만 old match에서 분리하고, 다른 참가자 링크는 그대로 둔다.
         userMatchMap.remove(userId, matchId);
         removeMatchSessionIfUnreferenced(matchId);
     }
@@ -603,6 +654,10 @@ public class InMemoryMatchStateStore implements MatchStateStore {
      * 이후 Redis 단계에서는 더 적합한 카운트/집합 구조로 바꿀 수 있다.
      */
     private void removeMatchSessionIfUnreferenced(Long matchId) {
+        // matchmap 에
+        // 1 -> 10
+        // 2 -> 10
+        // 가르키고 있으면 삭제하지말아라
         if (!userMatchMap.containsValue(matchId)) {
             // 더 이상 이 matchId를 참조하는 사용자가 없을 때만 세션 본문을 제거한다.
             matchSessionMap.remove(matchId);
