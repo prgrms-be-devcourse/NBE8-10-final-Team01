@@ -8,11 +8,13 @@ import org.springframework.validation.annotation.Validated;
 
 import com.back.domain.member.member.dto.JoinRequest;
 import com.back.domain.member.member.dto.LoginRequest;
+import com.back.domain.member.member.dto.LoginTokens;
 import com.back.domain.member.member.dto.MyInfoResponse;
 import com.back.domain.member.member.entity.Member;
 import com.back.domain.member.member.repository.MemberRepository;
 import com.back.global.exception.ServiceException;
 import com.back.global.jwt.JwtProvider;
+import com.back.global.jwt.RefreshTokenService;
 import com.back.global.rsData.RsData;
 
 import jakarta.validation.Valid;
@@ -25,6 +27,7 @@ public class MemberService {
     private final MemberRepository memberRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtProvider jwtProvider;
+    private final RefreshTokenService refreshTokenService;
 
     public RsData<Void> join(@Valid JoinRequest req) {
 
@@ -69,8 +72,8 @@ public class MemberService {
         return RsData.of("200", "내 정보 조회 성공", MyInfoResponse.from(member));
     }
 
-    // 로그인 — 인증 성공 시 accessToken 문자열 반환 (쿠키 설정은 컨트롤러가 담당)
-    public String login(@Valid LoginRequest req) {
+    // 로그인 — 인증 성공 시 accessToken + refreshToken 반환 (쿠키 설정은 컨트롤러가 담당)
+    public LoginTokens login(@Valid LoginRequest req) {
 
         // req null 방어
         if (req == null) {
@@ -90,11 +93,17 @@ public class MemberService {
             throw new ServiceException("MEMBER_401", "이메일 또는 비밀번호가 올바르지 않습니다");
         }
 
-        // JWT 토큰 생성 후 반환
-        return jwtProvider.createToken(
+        // accessToken + refreshToken 생성
+        String accessToken = jwtProvider.createToken(
                 member.getId(),
                 member.getEmail(),
                 member.getNickname(),
                 member.getRole().getKey());
+        String refreshToken = jwtProvider.createRefreshToken(member.getId());
+
+        // refreshToken Redis에 저장
+        refreshTokenService.save(member.getId(), refreshToken);
+
+        return new LoginTokens(accessToken, refreshToken);
     }
 }

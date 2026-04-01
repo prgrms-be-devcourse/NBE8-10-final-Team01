@@ -7,14 +7,11 @@ import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.ActiveProfiles;
 
 import com.back.domain.problem.problem.enums.DifficultyLevel;
+import com.back.global.IntegrationTestBase;
 
-@SpringBootTest
-@ActiveProfiles("test")
-class ProblemPickQueryRepositoryTest {
+class ProblemPickQueryRepositoryTest extends IntegrationTestBase {
 
     @Autowired
     private ProblemPickQueryRepository problemPickQueryRepository;
