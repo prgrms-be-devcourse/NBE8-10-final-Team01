@@ -2,9 +2,6 @@ package com.back.domain.matching.queue.service;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
-import java.util.stream.StreamSupport;
 
 import org.springframework.stereotype.Service;
 
@@ -25,8 +22,6 @@ import com.back.domain.matching.queue.model.MatchSessionStatus;
 import com.back.domain.matching.queue.model.QueueKey;
 import com.back.domain.matching.queue.model.WaitingUser;
 import com.back.domain.matching.queue.store.MatchStateStore;
-import com.back.domain.member.member.entity.Member;
-import com.back.domain.member.member.repository.MemberRepository;
 
 import lombok.RequiredArgsConstructor;
 
@@ -51,7 +46,6 @@ public class ReadyCheckService {
     private final BattleRoomService battleRoomService;
     private final QueueProblemPicker queueProblemPicker;
     private final MatchStateStore matchStateStore;
-    private final MemberRepository memberRepository;
 
     /**
      * v2 큐 참가
@@ -59,12 +53,14 @@ public class ReadyCheckService {
      * 4명이 되기 전까지는 기존과 같은 SEARCHING 의미지만,
      * 4명이 되는 순간에는 즉시 room을 만들지 않고 ready-check 세션만 생성한다.
      */
-    public QueueStatusResponse joinQueueV2(Long userId, QueueJoinRequest request) {
+    public QueueStatusResponse joinQueueV2(Long userId, String nickname, QueueJoinRequest request) {
         QueueKey queueKey = new QueueKey(request.getCategory(), request.getDifficulty());
         // 1L -> {array + hard}
         // array + hard = {user1,} 에들어감
         // 반환값은 큐 사이즈
-        int currentSize = matchStateStore.enqueue(userId, queueKey);
+        // 예: user1 이 "m1" 닉네임으로 queue 에 들어오면 이 snapshot 을 함께 넘긴다.
+        // 이후 matches/me 는 같은 nickname 을 재사용하고, members 재조회는 하지 않는다.
+        int currentSize = matchStateStore.enqueue(userId, nickname, queueKey);
 
         if (currentSize < REQUIRED_MATCH_SIZE) {
             // 아직 4명이 안 찼다면 기존 SEARCHING 단계로 머문다.
@@ -226,18 +222,15 @@ public class ReadyCheckService {
      */
     private ReadyCheckSnapshot buildReadyCheckSnapshot(Long userId, MatchSession matchSession) {
         // nickname은 store가 아니라 서비스에서 회원 정보를 합쳐 만든다.
-        Map<Long, String> nicknameByUserId = StreamSupport.stream(
-                        memberRepository
-                                .findAllById(matchSession.participantIds())
-                                .spliterator(),
-                        false)
-                .collect(Collectors.toMap(Member::getId, Member::getNickname, (left, right) -> left));
-
+        // 세션에 저장한 nickname snapshot 을 그대로 꺼내 쓴다.
+        // 예: participantIds = [1,2], participantNicknames = {1:"m1", 2:"m2"} 이면 participants = [(1,"m1"), (2,"m2")] 로
+        // 바로 조립된다.
+        // 그래서 matches/me 는 더 이상 members where id in (...) 조회를 다시 만들지 않는다.
         List<ReadyParticipantSnapshot> participants = matchSession.participantIds().stream()
                 // 참가자 원본 순서를 기준으로 snapshot을 만들면 프론트가 슬롯 UI를 안정적으로 그릴 수 있다.
                 .map(participantId -> new ReadyParticipantSnapshot(
                         participantId,
-                        nicknameByUserId.getOrDefault(participantId, String.valueOf(participantId)),
+                        matchSession.participantNicknames().getOrDefault(participantId, String.valueOf(participantId)),
                         matchSession.decisionOf(participantId)))
                 .toList();
 

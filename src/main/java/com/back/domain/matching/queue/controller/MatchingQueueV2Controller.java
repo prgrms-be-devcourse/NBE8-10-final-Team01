@@ -43,7 +43,10 @@ public class MatchingQueueV2Controller {
     public QueueStatusResponse joinQueue(@Valid @RequestBody QueueJoinRequest request) {
         // queue/join은 큐 참가만 담당하고,
         // ready-check 시작 여부 판단은 서비스에서 처리한다.
-        return readyCheckService.joinQueueV2(requireActorId(), request);
+        Member actor = requireActor();
+        // 예: user1 -> "m1" 이 queue에 들어갈 때 nickname snapshot도 함께 넘겨
+        // matches/me 에서 members 재조회 없이 ready-check 참가자 정보를 만들 수 있게 한다.
+        return readyCheckService.joinQueueV2(actor.getId(), actor.getNickname(), request);
     }
 
     @DeleteMapping("/cancel")
@@ -53,12 +56,16 @@ public class MatchingQueueV2Controller {
     }
 
     private Long requireActorId() {
+        return requireActor().getId();
+    }
+
+    private Member requireActor() {
         Member actor = rq.getActor();
 
         if (actor == null) {
             throw new ServiceException("MEMBER_401", "로그인이 필요합니다.");
         }
 
-        return actor.getId();
+        return actor;
     }
 }
