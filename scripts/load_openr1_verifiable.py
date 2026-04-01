@@ -20,6 +20,7 @@ import argparse
 import json
 import os
 import sys
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 from urllib.parse import quote
@@ -34,6 +35,27 @@ HF_DATASET = "open-r1/codeforces"
 HF_CONFIG = "verifiable"
 HF_SPLIT = "train"
 # open-r1 rows API에서 `tags` 필드를 제공한다. (list[str])
+
+
+@dataclass
+class SequenceBlockAllocator:
+    """시퀀스 증가폭 단위로 id 블록을 예약하고 로컬에서 순차 배정한다."""
+
+    sequence_name: str
+    block_size: int
+    next_candidate: int | None = None
+    block_end: int | None = None
+
+    def allocate(self, cur: psycopg.Cursor[Any]) -> int:
+        if self.next_candidate is None or self.block_end is None or self.next_candidate > self.block_end:
+            cur.execute("SELECT nextval(%s::regclass)", (self.sequence_name,))
+            block_start = int(cur.fetchone()[0])
+            self.next_candidate = block_start
+            self.block_end = block_start + self.block_size - 1
+
+        allocated_id = self.next_candidate
+        self.next_candidate += 1
+        return allocated_id
 
 
 def ensure_psycopg() -> None:
@@ -82,7 +104,10 @@ def get_rows(offset: int, length: int) -> list[dict[str, Any]]:
 
 
 def get_or_create_tag(
-    cur: psycopg.Cursor[Any], cache: dict[str, int], name: str, tag_id_sequence: str | None
+    cur: psycopg.Cursor[Any],
+    cache: dict[str, int],
+    name: str,
+    tag_id_allocator: SequenceBlockAllocator | None,
 ) -> int:
     """태그를 upsert 성격으로 조회/생성한다."""
     cached = cache.get(name)
@@ -96,10 +121,11 @@ def get_or_create_tag(
         cache[name] = tag_id
         return tag_id
 
-    if tag_id_sequence:
+    if tag_id_allocator:
+        tag_id = tag_id_allocator.allocate(cur)
         cur.execute(
-            f"INSERT INTO tags (id, name) VALUES (nextval('{tag_id_sequence}'), %s) RETURNING id",
-            (name,),
+            "INSERT INTO tags (id, name) VALUES (%s, %s) RETURNING id",
+            (tag_id, name),
         )
     else:
         cur.execute("INSERT INTO tags (name) VALUES (%s) RETURNING id", (name,))
@@ -217,8 +243,28 @@ def resolve_id_sequence(
     )
 
 
+def resolve_sequence_increment(cur: psycopg.Cursor[Any], sequence_name: str) -> int:
+    """시퀀스 increment 값을 조회한다."""
+    cur.execute(
+        """
+        SELECT seqincrement
+        FROM pg_catalog.pg_sequence
+        WHERE seqrelid = %s::regclass
+        """,
+        (sequence_name,),
+    )
+    row = cur.fetchone()
+    if not row or row[0] is None:
+        raise RuntimeError(f"Cannot resolve increment for sequence: {sequence_name}")
+
+    increment = int(row[0])
+    if increment <= 0:
+        raise RuntimeError(f"Invalid increment {increment} for sequence: {sequence_name}")
+    return increment
+
+
 def insert_problem(
-    cur: psycopg.Cursor[Any], row: dict[str, Any], problem_id_sequence: str | None
+    cur: psycopg.Cursor[Any], row: dict[str, Any], problem_id_allocator: SequenceBlockAllocator | None
 ) -> tuple[int, bool]:
     """problems 테이블에 1건 적재하고 (problem_id, 신규삽입여부)를 반환한다."""
     rating = row.get("rating")
@@ -233,10 +279,11 @@ def insert_problem(
     if existing is not None:
         return existing, False
 
-    if problem_id_sequence:
-        # id 기본값이 없을 때는 시퀀스를 명시적으로 사용한다.
+    if problem_id_allocator:
+        # 시퀀스 증가폭(예: 50) 단위로 예약한 블록 안에서 연속 id를 배정한다.
+        allocated_problem_id = problem_id_allocator.allocate(cur)
         cur.execute(
-            f"""
+            """
             INSERT INTO problems (
                 id,
                 source_problem_id,
@@ -251,10 +298,11 @@ def insert_problem(
                 input_mode,
                 checker_code,
                 judge_type
-            ) VALUES (nextval('{problem_id_sequence}'), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
             (
+                allocated_problem_id,
                 source_problem_id,
                 title,
                 difficulty,
@@ -311,15 +359,15 @@ def insert_problem_tags(
     tag_cache: dict[str, int],
     problem_id: int,
     tags: list[str],
-    tag_id_sequence: str | None,
-    problem_tag_connect_id_sequence: str | None,
+    tag_id_allocator: SequenceBlockAllocator | None,
+    problem_tag_connect_id_allocator: SequenceBlockAllocator | None,
 ) -> None:
     """문제-태그 연결 테이블을 채운다(중복 연결 방지)."""
     for tag in tags:
         tag_name = tag.strip()
         if not tag_name:
             continue
-        tag_id = get_or_create_tag(cur, tag_cache, tag_name, tag_id_sequence)
+        tag_id = get_or_create_tag(cur, tag_cache, tag_name, tag_id_allocator)
         cur.execute(
             """
             SELECT 1
@@ -331,13 +379,14 @@ def insert_problem_tags(
         )
         if cur.fetchone():
             continue
-        if problem_tag_connect_id_sequence:
+        if problem_tag_connect_id_allocator:
+            allocated_connect_id = problem_tag_connect_id_allocator.allocate(cur)
             cur.execute(
-                f"""
+                """
                 INSERT INTO problem_tag_connect (id, problem_id, tag_id)
-                VALUES (nextval('{problem_tag_connect_id_sequence}'), %s, %s)
+                VALUES (%s, %s, %s)
                 """,
-                (problem_id, tag_id),
+                (allocated_connect_id, problem_id, tag_id),
             )
         else:
             cur.execute(
@@ -355,7 +404,7 @@ def insert_test_cases(
     examples: list[dict[str, str]],
     official_tests: list[dict[str, str]],
     max_tests_per_problem: int,
-    test_case_id_sequence: str | None,
+    test_case_id_allocator: SequenceBlockAllocator | None,
 ) -> tuple[int, int]:
     """examples는 sample, official_tests는 hidden 테스트로 분리 적재한다."""
     inserted_sample = 0
@@ -365,13 +414,14 @@ def insert_test_cases(
     hidden_cases = official_tests[: max_tests_per_problem]
 
     for case in sample_cases:
-        if test_case_id_sequence:
+        if test_case_id_allocator:
+            allocated_test_case_id = test_case_id_allocator.allocate(cur)
             cur.execute(
-                f"""
+                """
                 INSERT INTO test_cases (id, problem_id, input, expected_output, is_sample)
-                VALUES (nextval('{test_case_id_sequence}'), %s, %s, %s, true)
+                VALUES (%s, %s, %s, %s, true)
                 """,
-                (problem_id, case.get("input", ""), case.get("output", "")),
+                (allocated_test_case_id, problem_id, case.get("input", ""), case.get("output", "")),
             )
         else:
             cur.execute(
@@ -384,13 +434,14 @@ def insert_test_cases(
         inserted_sample += 1
 
     for case in hidden_cases:
-        if test_case_id_sequence:
+        if test_case_id_allocator:
+            allocated_test_case_id = test_case_id_allocator.allocate(cur)
             cur.execute(
-                f"""
+                """
                 INSERT INTO test_cases (id, problem_id, input, expected_output, is_sample)
-                VALUES (nextval('{test_case_id_sequence}'), %s, %s, %s, false)
+                VALUES (%s, %s, %s, %s, false)
                 """,
-                (problem_id, case.get("input", ""), case.get("output", "")),
+                (allocated_test_case_id, problem_id, case.get("input", ""), case.get("output", "")),
             )
         else:
             cur.execute(
@@ -507,6 +558,10 @@ def main() -> int:
     tag_id_sequence: str | None = None
     test_case_id_sequence: str | None = None
     problem_tag_connect_id_sequence: str | None = None
+    problem_id_allocator: SequenceBlockAllocator | None = None
+    tag_id_allocator: SequenceBlockAllocator | None = None
+    test_case_id_allocator: SequenceBlockAllocator | None = None
+    problem_tag_connect_id_allocator: SequenceBlockAllocator | None = None
 
     try:
         if not args.dry_run:
@@ -520,9 +575,38 @@ def main() -> int:
             problem_tag_connect_id_sequence = resolve_id_sequence(
                 cur, "problem_tag_connect", ("problem_tag_id_seq",)
             )
+            if problem_id_sequence:
+                problem_id_allocator = SequenceBlockAllocator(
+                    sequence_name=problem_id_sequence,
+                    block_size=resolve_sequence_increment(cur, problem_id_sequence),
+                )
+            if tag_id_sequence:
+                tag_id_allocator = SequenceBlockAllocator(
+                    sequence_name=tag_id_sequence,
+                    block_size=resolve_sequence_increment(cur, tag_id_sequence),
+                )
+            if test_case_id_sequence:
+                test_case_id_allocator = SequenceBlockAllocator(
+                    sequence_name=test_case_id_sequence,
+                    block_size=resolve_sequence_increment(cur, test_case_id_sequence),
+                )
+            if problem_tag_connect_id_sequence:
+                problem_tag_connect_id_allocator = SequenceBlockAllocator(
+                    sequence_name=problem_tag_connect_id_sequence,
+                    block_size=resolve_sequence_increment(cur, problem_tag_connect_id_sequence),
+                )
             if args.truncate:
                 # problems를 참조하는 연관 테이블(FK)까지 함께 비우기 위해 CASCADE를 사용한다.
-                cur.execute("TRUNCATE TABLE test_cases, problem_tag_connect, tags, problems RESTART IDENTITY CASCADE")
+                cur.execute("TRUNCATE TABLE test_cases, problem_tag_connect, tags, problems CASCADE")
+                # JPA sequence는 table-owned identity가 아니므로 명시적으로 초기화한다.
+                if problem_id_sequence:
+                    cur.execute("SELECT setval(%s::regclass, 1, false)", (problem_id_sequence,))
+                if tag_id_sequence:
+                    cur.execute("SELECT setval(%s::regclass, 1, false)", (tag_id_sequence,))
+                if test_case_id_sequence:
+                    cur.execute("SELECT setval(%s::regclass, 1, false)", (test_case_id_sequence,))
+                if problem_tag_connect_id_sequence:
+                    cur.execute("SELECT setval(%s::regclass, 1, false)", (problem_tag_connect_id_sequence,))
                 print("truncated tables")
 
         remaining = args.limit
@@ -551,7 +635,7 @@ def main() -> int:
 
                 # dry-run 모드가 아니면 DB 커서는 항상 존재한다.
                 assert cur is not None
-                problem_id, inserted = insert_problem(cur, row, problem_id_sequence)
+                problem_id, inserted = insert_problem(cur, row, problem_id_allocator)
                 if not inserted:
                     stats["skipped_existing_problem"] += 1
                     continue
@@ -562,8 +646,8 @@ def main() -> int:
                     tag_cache,
                     problem_id,
                     normalize_tags(row.get("tags")),
-                    tag_id_sequence,
-                    problem_tag_connect_id_sequence,
+                    tag_id_allocator,
+                    problem_tag_connect_id_allocator,
                 )
                 sample_n, hidden_n = insert_test_cases(
                     cur,
@@ -571,7 +655,7 @@ def main() -> int:
                     row.get("examples") or [],
                     row.get("official_tests") or [],
                     args.max_tests_per_problem,
-                    test_case_id_sequence,
+                    test_case_id_allocator,
                 )
                 stats["sample_tests"] += sample_n
                 stats["hidden_tests"] += hidden_n
