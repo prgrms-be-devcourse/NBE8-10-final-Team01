@@ -36,10 +36,14 @@ public class SecurityConfig {
                                 "/api/v1/members/login",
                                 // 로그아웃은 인증 없이도 호출 가능해야 함
                                 "/api/v1/members/logout",
-                                // TODO: WebSocket 핸드셰이크는 permitAll 필요하나, STOMP ChannelInterceptor로 인증 강제 필요
+                                // WebSocket 핸드셰이크는 HTTP 레벨에서 허용:
+                                // - 로컬 환경: JWT 쿠키가 자동 전송되어 JwtAuthenticationFilter가 인증 처리
+                                // - 배포 환경: cross-origin으로 쿠키 자동 전송 불가 → 쿠키 없이 핸드셰이크 허용
+                                // 실제 인증 검증은 STOMP CONNECT 단계에서 ChannelInterceptor가 담당
+                                // (쿠키 기반 Principal 전파 또는 X-WS-Token 1회용 토큰 검증)
                                 "/ws/**")
                         .permitAll()
-                        // 그 외 모든 요청은 인증 필요
+                        // 그 외 모든 요청은 인증 필요 (POST /api/v1/ws/token 포함)
                         .anyRequest()
                         .authenticated())
                 // UsernamePasswordAuthenticationFilter 앞에 JWT 필터 삽입
