@@ -17,6 +17,7 @@ import com.back.domain.battle.battleroom.dto.BattleRoomStateResponse;
 import com.back.domain.battle.battleroom.dto.CreateRoomRequest;
 import com.back.domain.battle.battleroom.dto.CreateRoomResponse;
 import com.back.domain.battle.battleroom.dto.JoinRoomResponse;
+import com.back.domain.battle.battleroom.dto.OngoingRoomResponse;
 import com.back.domain.battle.battleroom.dto.RoomResponse;
 import com.back.domain.battle.battleroom.entity.BattleRoom;
 import com.back.domain.battle.battleroom.entity.BattleRoomStatus;
@@ -25,6 +26,7 @@ import com.back.domain.member.member.entity.Member;
 import com.back.domain.member.member.repository.MemberRepository;
 import com.back.domain.problem.problem.entity.Problem;
 import com.back.domain.problem.problem.repository.ProblemRepository;
+import com.back.global.exception.ServiceException;
 import com.back.global.websocket.BattleCodeStore;
 
 import lombok.RequiredArgsConstructor;
@@ -142,6 +144,40 @@ public class BattleRoomService {
 
         List<BattleParticipant> participants = battleParticipantRepository.findByBattleRoom(room);
         return RoomResponse.from(room, participants);
+    }
+
+    @Transactional
+    public void exitRoom(Long roomId, Long memberId) {
+
+        BattleRoom room =
+                battleRoomRepository.findById(roomId).orElseThrow(() -> new ServiceException("404-1", "존재하지 않는 방입니다."));
+
+        if (room.getStatus() != BattleRoomStatus.PLAYING) {
+            throw new ServiceException("400-1", "진행 중인 방이 아닙니다.");
+        }
+
+        Member member =
+                memberRepository.findById(memberId).orElseThrow(() -> new ServiceException("404-1", "존재하지 않는 회원입니다."));
+
+        BattleParticipant participant = battleParticipantRepository
+                .findByBattleRoomAndMember(room, member)
+                .orElseThrow(() -> new ServiceException("403-1", "해당 방의 참여자가 아닙니다."));
+
+        if (participant.getStatus() != BattleParticipantStatus.PLAYING) {
+            throw new ServiceException("400-1", "게임 중인 상태가 아닙니다. 현재 상태: " + participant.getStatus());
+        }
+
+        participant.quit();
+        battleParticipantRepository.save(participant);
+    }
+
+    @Transactional(readOnly = true)
+    public OngoingRoomResponse getOngoingRoom(Long memberId) {
+        return battleParticipantRepository
+                .findAbandonedParticipantByMemberId(
+                        memberId, BattleParticipantStatus.ABANDONED, BattleRoomStatus.PLAYING)
+                .map(p -> new OngoingRoomResponse(p.getBattleRoom().getId()))
+                .orElse(null);
     }
 
     @Transactional(readOnly = true)

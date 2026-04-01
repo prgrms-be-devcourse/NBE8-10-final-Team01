@@ -58,6 +58,10 @@ public class BattleParticipant extends BaseEntity {
         this.status = BattleParticipantStatus.ABANDONED;
     }
 
+    public void quit() {
+        this.status = BattleParticipantStatus.QUIT;
+    }
+
     public void applyResult(int rank, long delta) {
         this.finalRank = rank;
         this.scoreDelta = delta;

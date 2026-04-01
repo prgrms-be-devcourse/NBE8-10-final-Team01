@@ -13,6 +13,7 @@ import com.back.domain.battle.battleroom.dto.BattleRoomStateResponse;
 import com.back.domain.battle.battleroom.dto.CreateRoomRequest;
 import com.back.domain.battle.battleroom.dto.CreateRoomResponse;
 import com.back.domain.battle.battleroom.dto.JoinRoomResponse;
+import com.back.domain.battle.battleroom.dto.OngoingRoomResponse;
 import com.back.domain.battle.battleroom.dto.RoomResponse;
 import com.back.domain.battle.battleroom.service.BattleRoomService;
 import com.back.domain.matching.queue.service.ReadyCheckService;
@@ -57,5 +58,26 @@ public class BattleRoomController {
     public BattleRoomStateResponse getRoomState(@PathVariable Long roomId) {
         Long memberId = rq.getActor().getId();
         return battleRoomService.getRoomState(roomId, memberId);
+    }
+
+    /**
+     * 뒤로가기 확인 시 의도적 퇴장 처리
+     * PLAYING → QUIT (꼴찌, 재입장 불가)
+     */
+    @PostMapping("/{roomId}/exit")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void exitRoom(@PathVariable Long roomId) {
+        Long memberId = rq.getActor().getId();
+        battleRoomService.exitRoom(roomId, memberId);
+    }
+
+    /**
+     * 네트워크 이탈(ABANDONED) 상태로 진행 중인 방이 있는지 조회
+     * 상단 메뉴 재입장 버튼 및 매칭 버튼 가드용
+     */
+    @GetMapping("/ongoing")
+    public OngoingRoomResponse getOngoingRoom() {
+        Long memberId = rq.getActor().getId();
+        return battleRoomService.getOngoingRoom(memberId);
     }
 }
