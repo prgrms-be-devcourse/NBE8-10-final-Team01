@@ -20,6 +20,8 @@ package com.back.domain.matching.queue.model;
 public enum MatchSessionStatus {
     // v2 ready-check가 시작됐지만 아직 전원 수락 전인 상태
     ACCEPT_PENDING,
+    // 전원 수락은 끝났지만 room 생성 권한을 한 요청이 선점한 내부 상태
+    ROOM_CREATING,
     // 전원 수락이 끝나 roomId까지 연결된 상태
     ROOM_READY,
     // 제한 시간이 지나 ready-check가 무효가 된 상태

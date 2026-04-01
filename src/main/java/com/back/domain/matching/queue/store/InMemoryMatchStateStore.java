@@ -316,31 +316,46 @@ public class InMemoryMatchStateStore implements MatchStateStore {
      */
     @Override
     public MatchSession accept(Long matchId, Long userId) {
-        MatchSession matchSession = requireMatchSession(matchId);
+        final LocalDateTime now = LocalDateTime.now();
+        final MatchSession[] resultHolder = new MatchSession[1];
 
-        if (!matchSession.hasParticipant(userId)) {
-            throw new IllegalStateException("매치 참가자가 아닌 사용자는 수락할 수 없습니다.");
-        }
+        matchSessionMap.compute(matchId, (id, currentSession) -> {
+            if (currentSession == null) {
+                throw new IllegalStateException("존재하지 않는 매치 세션입니다.");
+            }
 
-        if (matchSession.isExpiredAt(LocalDateTime.now())) {
-            // 스케줄러 대신 lazy expire를 사용하므로,
-            // 읽기/액션 시점에 deadline을 넘겼으면 여기서 바로 EXPIRED로 바꾼다.
-            return expire(matchId);
-        }
+            if (!currentSession.hasParticipant(userId)) {
+                throw new IllegalStateException("매치 참가자가 아닌 사용자는 수락할 수 없습니다.");
+            }
 
-        if (matchSession.status() != MatchSessionStatus.ACCEPT_PENDING) {
-            // 이미 ROOM_READY, CANCELLED, EXPIRED 같은 최종 상태면 더 바꾸지 않는다.
-            return matchSession;
-        }
+            if (currentSession.isExpiredAt(now)) {
+                // 스케줄러 대신 lazy expire를 사용하므로,
+                // 읽기/액션 시점에 deadline을 넘겼으면 여기서 바로 EXPIRED로 바꾼다.
+                MatchSession expiredSession = currentSession.status() == MatchSessionStatus.ACCEPT_PENDING
+                        ? currentSession.expired()
+                        : currentSession;
+                resultHolder[0] = expiredSession;
+                return expiredSession;
+            }
 
-        if (matchSession.decisionOf(userId) == ReadyDecision.ACCEPTED) {
-            // 같은 사용자의 중복 accept는 현재 상태를 그대로 돌려준다.
-            return matchSession;
-        }
+            if (currentSession.status() != MatchSessionStatus.ACCEPT_PENDING) {
+                // 이미 ROOM_CREATING, ROOM_READY, CANCELLED, EXPIRED 같은 상태면 더 바꾸지 않는다.
+                resultHolder[0] = currentSession;
+                return currentSession;
+            }
 
-        MatchSession updatedSession = matchSession.withDecision(userId, ReadyDecision.ACCEPTED);
-        matchSessionMap.put(matchId, updatedSession);
-        return updatedSession;
+            if (currentSession.decisionOf(userId) == ReadyDecision.ACCEPTED) {
+                // 같은 사용자의 중복 accept는 현재 상태를 그대로 돌려준다.
+                resultHolder[0] = currentSession;
+                return currentSession;
+            }
+
+            MatchSession updatedSession = currentSession.withDecision(userId, ReadyDecision.ACCEPTED);
+            resultHolder[0] = updatedSession;
+            return updatedSession;
+        });
+
+        return resultHolder[0];
     }
 
     /**
@@ -351,26 +366,71 @@ public class InMemoryMatchStateStore implements MatchStateStore {
      */
     @Override
     public MatchSession decline(Long matchId, Long userId) {
-        MatchSession matchSession = requireMatchSession(matchId);
+        final LocalDateTime now = LocalDateTime.now();
+        final MatchSession[] resultHolder = new MatchSession[1];
 
-        if (!matchSession.hasParticipant(userId)) {
-            throw new IllegalStateException("매치 참가자가 아닌 사용자는 거절할 수 없습니다.");
-        }
+        matchSessionMap.compute(matchId, (id, currentSession) -> {
+            if (currentSession == null) {
+                throw new IllegalStateException("존재하지 않는 매치 세션입니다.");
+            }
 
-        if (matchSession.isExpiredAt(LocalDateTime.now())) {
-            // 거절을 누른 시점에 이미 deadline이 지났다면 거절보다 만료를 우선 반영한다.
-            return expire(matchId);
-        }
+            if (!currentSession.hasParticipant(userId)) {
+                throw new IllegalStateException("매치 참가자가 아닌 사용자는 거절할 수 없습니다.");
+            }
 
-        if (matchSession.status() != MatchSessionStatus.ACCEPT_PENDING) {
-            return matchSession;
-        }
+            if (currentSession.isExpiredAt(now)) {
+                // 거절을 누른 시점에 이미 deadline이 지났다면 거절보다 만료를 우선 반영한다.
+                MatchSession expiredSession = currentSession.status() == MatchSessionStatus.ACCEPT_PENDING
+                        ? currentSession.expired()
+                        : currentSession;
+                resultHolder[0] = expiredSession;
+                return expiredSession;
+            }
 
-        // 이번 단계 정책에서는 한 명이 DECLINED가 되면 세션 전체를 종료한다.
-        MatchSession updatedSession =
-                matchSession.withDecision(userId, ReadyDecision.DECLINED).cancelled();
-        matchSessionMap.put(matchId, updatedSession);
-        return updatedSession;
+            if (currentSession.status() != MatchSessionStatus.ACCEPT_PENDING) {
+                resultHolder[0] = currentSession;
+                return currentSession;
+            }
+
+            // 이번 단계 정책에서는 한 명이 DECLINED가 되면 세션 전체를 종료한다.
+            MatchSession updatedSession =
+                    currentSession.withDecision(userId, ReadyDecision.DECLINED).cancelled();
+            resultHolder[0] = updatedSession;
+            return updatedSession;
+        });
+
+        return resultHolder[0];
+    }
+
+    @Override
+    public RoomCreationAttempt tryBeginRoomCreation(Long matchId) {
+        final boolean[] acquired = new boolean[] {false};
+        final MatchSession[] resultHolder = new MatchSession[1];
+
+        matchSessionMap.compute(matchId, (id, currentSession) -> {
+            if (currentSession == null) {
+                throw new IllegalStateException("존재하지 않는 매치 세션입니다.");
+            }
+
+            if (currentSession.status() != MatchSessionStatus.ACCEPT_PENDING) {
+                resultHolder[0] = currentSession;
+                return currentSession;
+            }
+
+            if (!currentSession.isAllAccepted()) {
+                resultHolder[0] = currentSession;
+                return currentSession;
+            }
+
+            // 마지막 accept 경쟁 상황에서는 한 요청만 ROOM_CREATING으로 선점해야
+            // createRoom(...)가 한 번만 호출된다.
+            MatchSession roomCreatingSession = currentSession.roomCreating();
+            acquired[0] = true;
+            resultHolder[0] = roomCreatingSession;
+            return roomCreatingSession;
+        });
+
+        return new RoomCreationAttempt(resultHolder[0], acquired[0]);
     }
 
     /**
@@ -381,11 +441,31 @@ public class InMemoryMatchStateStore implements MatchStateStore {
      */
     @Override
     public MatchSession markRoomReady(Long matchId, Long roomId) {
-        MatchSession matchSession = requireMatchSession(matchId);
-        // roomId가 세션에 연결되는 순간부터 프론트는 실제 입장 가능한 상태가 된다.
-        MatchSession updatedSession = matchSession.roomReady(roomId);
-        matchSessionMap.put(matchId, updatedSession);
-        return updatedSession;
+        final MatchSession[] resultHolder = new MatchSession[1];
+
+        matchSessionMap.compute(matchId, (id, currentSession) -> {
+            if (currentSession == null) {
+                throw new IllegalStateException("존재하지 않는 매치 세션입니다.");
+            }
+
+            if (currentSession.status() == MatchSessionStatus.ROOM_READY) {
+                resultHolder[0] = currentSession;
+                return currentSession;
+            }
+
+            if (currentSession.status() != MatchSessionStatus.ROOM_CREATING
+                    && currentSession.status() != MatchSessionStatus.ACCEPT_PENDING) {
+                resultHolder[0] = currentSession;
+                return currentSession;
+            }
+
+            // roomId가 세션에 연결되는 순간부터 프론트는 실제 입장 가능한 상태가 된다.
+            MatchSession updatedSession = currentSession.roomReady(roomId);
+            resultHolder[0] = updatedSession;
+            return updatedSession;
+        });
+
+        return resultHolder[0];
     }
 
     /**
@@ -413,16 +493,25 @@ public class InMemoryMatchStateStore implements MatchStateStore {
      */
     @Override
     public MatchSession cancelMatch(Long matchId) {
-        MatchSession matchSession = requireMatchSession(matchId);
+        final MatchSession[] resultHolder = new MatchSession[1];
 
-        if (matchSession.status() == MatchSessionStatus.CANCELLED) {
-            return matchSession;
-        }
+        matchSessionMap.compute(matchId, (id, currentSession) -> {
+            if (currentSession == null) {
+                throw new IllegalStateException("존재하지 않는 매치 세션입니다.");
+            }
 
-        // room 생성 실패 같은 시스템 사유도 ready-check 거절과 동일하게 취소 상태로 묶는다.
-        MatchSession updatedSession = matchSession.cancelled();
-        matchSessionMap.put(matchId, updatedSession);
-        return updatedSession;
+            if (currentSession.status() == MatchSessionStatus.CANCELLED) {
+                resultHolder[0] = currentSession;
+                return currentSession;
+            }
+
+            // room 생성 실패 같은 시스템 사유도 ready-check 거절과 동일하게 취소 상태로 묶는다.
+            MatchSession updatedSession = currentSession.cancelled();
+            resultHolder[0] = updatedSession;
+            return updatedSession;
+        });
+
+        return resultHolder[0];
     }
 
     /**

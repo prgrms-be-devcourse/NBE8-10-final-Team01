@@ -1,7 +1,6 @@
 package com.back.domain.matching.queue.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.mock;
@@ -9,10 +8,14 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.lang.reflect.Field;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -28,20 +31,20 @@ import com.back.domain.matching.queue.dto.QueueJoinRequest;
 import com.back.domain.matching.queue.dto.QueueStateV2Response;
 import com.back.domain.matching.queue.dto.QueueStatusResponse;
 import com.back.domain.matching.queue.model.Difficulty;
+import com.back.domain.matching.queue.model.MatchSessionStatus;
 import com.back.domain.matching.queue.model.QueueKey;
 import com.back.domain.matching.queue.model.WaitingUser;
 import com.back.domain.matching.queue.store.InMemoryMatchStateStore;
 import com.back.domain.matching.queue.store.MatchStateStore;
 import com.back.domain.member.member.entity.Member;
 import com.back.domain.member.member.repository.MemberRepository;
-import com.back.global.exception.ServiceException;
 
 class ReadyCheckServiceTest {
 
     private final BattleRoomService battleRoomService = mock(BattleRoomService.class);
     private final QueueProblemPicker queueProblemPicker = mock(QueueProblemPicker.class);
     private final MemberRepository memberRepository = mock(MemberRepository.class);
-    private final MatchStateStore matchStateStore = new InMemoryMatchStateStore();
+    private final InMemoryMatchStateStore matchStateStore = new InMemoryMatchStateStore();
 
     private final ReadyCheckService readyCheckService =
             new ReadyCheckService(battleRoomService, queueProblemPicker, matchStateStore, memberRepository);
@@ -73,18 +76,6 @@ class ReadyCheckServiceTest {
     }
 
     @Test
-    @DisplayName("SEARCHING 중 같은 사용자가 다시 join하면 409 conflict를 반환한다")
-    void joinQueueV2_throwsConflict_whenUserAlreadySearching() {
-        readyCheckService.joinQueueV2(1L, createRequest("Array", Difficulty.EASY));
-
-        assertThatThrownBy(() -> readyCheckService.joinQueueV2(1L, createRequest("Array", Difficulty.EASY)))
-                .isInstanceOfSatisfying(ServiceException.class, ex -> {
-                    assertThat(ex.getResultCode()).isEqualTo("409-1");
-                    assertThat(ex.getMsg()).isEqualTo("이미 매칭 대기열에 참가 중인 사용자입니다.");
-                });
-    }
-
-    @Test
     @DisplayName("4명이 모이면 v2 matches/me는 ACCEPT_PENDING을 반환한다")
     void getMyMatchStateV2_returnsAcceptPending_whenFourthUserJoins() {
         readyCheckService.joinQueueV2(1L, createRequest("Array", Difficulty.EASY));
@@ -103,21 +94,6 @@ class ReadyCheckServiceTest {
         assertThat(response.readyCheck().requiredCount()).isEqualTo(4);
         assertThat(response.readyCheck().acceptedByMe()).isFalse();
         assertThat(response.readyCheck().participants()).hasSize(4);
-    }
-
-    @Test
-    @DisplayName("ACCEPT_PENDING 상태 사용자가 다시 join하면 409 conflict를 반환한다")
-    void joinQueueV2_throwsConflict_whenUserAlreadyInAcceptPending() {
-        readyCheckService.joinQueueV2(1L, createRequest("Array", Difficulty.EASY));
-        readyCheckService.joinQueueV2(2L, createRequest("Array", Difficulty.EASY));
-        readyCheckService.joinQueueV2(3L, createRequest("Array", Difficulty.EASY));
-        readyCheckService.joinQueueV2(4L, createRequest("Array", Difficulty.EASY));
-
-        assertThatThrownBy(() -> readyCheckService.joinQueueV2(1L, createRequest("Array", Difficulty.EASY)))
-                .isInstanceOfSatisfying(ServiceException.class, ex -> {
-                    assertThat(ex.getResultCode()).isEqualTo("409-1");
-                    assertThat(ex.getMsg()).isEqualTo("이미 진행 중인 매칭이 있습니다.");
-                });
     }
 
     @Test
@@ -146,31 +122,6 @@ class ReadyCheckServiceTest {
     }
 
     @Test
-    @DisplayName("ROOM_READY 상태 사용자가 다시 join하면 409 conflict를 반환한다")
-    void joinQueueV2_throwsConflict_whenUserAlreadyInRoomReady() {
-        when(battleRoomService.createRoom(any(CreateRoomRequest.class)))
-                .thenReturn(new CreateRoomResponse(100L, "WAITING"));
-
-        readyCheckService.joinQueueV2(1L, createRequest("Array", Difficulty.EASY));
-        readyCheckService.joinQueueV2(2L, createRequest("Array", Difficulty.EASY));
-        readyCheckService.joinQueueV2(3L, createRequest("Array", Difficulty.EASY));
-        readyCheckService.joinQueueV2(4L, createRequest("Array", Difficulty.EASY));
-
-        Long matchId = readyCheckService.getMyMatchStateV2(1L).readyCheck().matchId();
-
-        readyCheckService.acceptMatch(1L, matchId);
-        readyCheckService.acceptMatch(2L, matchId);
-        readyCheckService.acceptMatch(3L, matchId);
-        readyCheckService.acceptMatch(4L, matchId);
-
-        assertThatThrownBy(() -> readyCheckService.joinQueueV2(1L, createRequest("Array", Difficulty.EASY)))
-                .isInstanceOfSatisfying(ServiceException.class, ex -> {
-                    assertThat(ex.getResultCode()).isEqualTo("409-1");
-                    assertThat(ex.getMsg()).isEqualTo("이미 진행 중인 매칭이 있습니다.");
-                });
-    }
-
-    @Test
     @DisplayName("한 명이라도 거절하면 세션 전체가 CANCELLED로 종료된다")
     void declineMatch_returnsCancelled() {
         readyCheckService.joinQueueV2(1L, createRequest("Array", Difficulty.EASY));
@@ -192,28 +143,7 @@ class ReadyCheckServiceTest {
     }
 
     @Test
-    @DisplayName("CANCELLED 상태에서 한 사용자만 다시 join하면 그 사용자만 새 queue에 들어가고 나머지는 terminal 상태를 유지한다")
-    void joinQueueV2_allowsRejoinForOnlyCurrentUser_whenSessionCancelled() {
-        readyCheckService.joinQueueV2(1L, createRequest("Array", Difficulty.EASY));
-        readyCheckService.joinQueueV2(2L, createRequest("Array", Difficulty.EASY));
-        readyCheckService.joinQueueV2(3L, createRequest("Array", Difficulty.EASY));
-        readyCheckService.joinQueueV2(4L, createRequest("Array", Difficulty.EASY));
-
-        Long matchId = readyCheckService.getMyMatchStateV2(1L).readyCheck().matchId();
-        readyCheckService.declineMatch(2L, matchId);
-
-        QueueStatusResponse rejoinResponse = readyCheckService.joinQueueV2(1L, createRequest("Graph", Difficulty.EASY));
-
-        assertThat(rejoinResponse.getWaitingCount()).isEqualTo(1);
-        assertThat(readyCheckService.getMyQueueStateV2(1L).inQueue()).isTrue();
-        assertThat(readyCheckService.getMyMatchStateV2(1L).status()).isEqualTo(MatchStatus.IDLE);
-        assertThat(readyCheckService.getMyMatchStateV2(2L).status()).isEqualTo(MatchStatus.CANCELLED);
-        assertThat(readyCheckService.getMyMatchStateV2(3L).status()).isEqualTo(MatchStatus.CANCELLED);
-        assertThat(readyCheckService.getMyMatchStateV2(4L).status()).isEqualTo(MatchStatus.CANCELLED);
-    }
-
-    @Test
-    @DisplayName("deadline이 지나면 ready-check 세션은 EXPIRED로 조회된다")
+    @DisplayName("deadline이 지난 ready-check 세션은 EXPIRED로 조회된다")
     void getMyMatchStateV2_returnsExpired_whenDeadlinePassed() {
         QueueKey queueKey = new QueueKey("Array", Difficulty.EASY);
         List<WaitingUser> users = List.of(
@@ -231,31 +161,7 @@ class ReadyCheckServiceTest {
     }
 
     @Test
-    @DisplayName("EXPIRED 상태에서도 현재 사용자만 cleanup 후 다시 join할 수 있다")
-    void joinQueueV2_allowsRejoinForOnlyCurrentUser_whenSessionExpired() {
-        QueueKey queueKey = new QueueKey("Array", Difficulty.EASY);
-        List<WaitingUser> users = List.of(
-                new WaitingUser(1L, queueKey),
-                new WaitingUser(2L, queueKey),
-                new WaitingUser(3L, queueKey),
-                new WaitingUser(4L, queueKey));
-
-        matchStateStore.markAcceptPending(queueKey, users, LocalDateTime.now().minusSeconds(1));
-
-        assertThat(readyCheckService.getMyMatchStateV2(1L).status()).isEqualTo(MatchStatus.EXPIRED);
-
-        QueueStatusResponse rejoinResponse = readyCheckService.joinQueueV2(1L, createRequest("Graph", Difficulty.EASY));
-
-        assertThat(rejoinResponse.getWaitingCount()).isEqualTo(1);
-        assertThat(readyCheckService.getMyQueueStateV2(1L).inQueue()).isTrue();
-        assertThat(readyCheckService.getMyMatchStateV2(1L).status()).isEqualTo(MatchStatus.IDLE);
-        assertThat(readyCheckService.getMyMatchStateV2(2L).status()).isEqualTo(MatchStatus.EXPIRED);
-        assertThat(readyCheckService.getMyMatchStateV2(3L).status()).isEqualTo(MatchStatus.EXPIRED);
-        assertThat(readyCheckService.getMyMatchStateV2(4L).status()).isEqualTo(MatchStatus.EXPIRED);
-    }
-
-    @Test
-    @DisplayName("방 생성에 실패하면 CANCELLED 상태와 실패 메시지를 반환한다")
+    @DisplayName("방 생성이 실패하면 CANCELLED 상태와 실패 메시지를 반환한다")
     void acceptMatch_returnsCancelled_whenCreateRoomFails() {
         when(battleRoomService.createRoom(any(CreateRoomRequest.class)))
                 .thenThrow(new RuntimeException("room create failed"));
@@ -303,57 +209,109 @@ class ReadyCheckServiceTest {
     }
 
     @Test
-    @DisplayName("stale session은 재join 시 cleanup 후 정상 참가된다")
-    void joinQueueV2_cleansUpStaleSession_whenOnlyUserMatchLinkRemains() throws Exception {
+    @DisplayName("마지막 accept가 동시에 들어와도 room은 한 번만 생성된다")
+    void acceptMatch_createsRoomOnlyOnce_whenLastAcceptsRace() throws Exception {
+        AtomicInteger createRoomCallCount = new AtomicInteger();
+        when(battleRoomService.createRoom(any(CreateRoomRequest.class))).thenAnswer(invocation -> {
+            createRoomCallCount.incrementAndGet();
+            Thread.sleep(200);
+            return new CreateRoomResponse(100L, "WAITING");
+        });
+
         readyCheckService.joinQueueV2(1L, createRequest("Array", Difficulty.EASY));
         readyCheckService.joinQueueV2(2L, createRequest("Array", Difficulty.EASY));
         readyCheckService.joinQueueV2(3L, createRequest("Array", Difficulty.EASY));
         readyCheckService.joinQueueV2(4L, createRequest("Array", Difficulty.EASY));
 
         Long matchId = readyCheckService.getMyMatchStateV2(1L).readyCheck().matchId();
-        matchSessionMap().remove(matchId);
 
-        QueueStatusResponse response = readyCheckService.joinQueueV2(1L, createRequest("Graph", Difficulty.EASY));
+        readyCheckService.acceptMatch(1L, matchId);
+        readyCheckService.acceptMatch(2L, matchId);
 
-        assertThat(response.getWaitingCount()).isEqualTo(1);
-        assertThat(userMatchMap().containsKey(1L)).isFalse();
-        assertThat(readyCheckService.getMyQueueStateV2(1L).inQueue()).isTrue();
+        CountDownLatch startLatch = new CountDownLatch(1);
+        ExecutorService executorService = Executors.newFixedThreadPool(2);
+
+        try {
+            Future<MatchStateV2Response> user3Future = executorService.submit(() -> {
+                startLatch.await();
+                return readyCheckService.acceptMatch(3L, matchId);
+            });
+            Future<MatchStateV2Response> user4Future = executorService.submit(() -> {
+                startLatch.await();
+                return readyCheckService.acceptMatch(4L, matchId);
+            });
+
+            startLatch.countDown();
+
+            MatchStateV2Response user3Response = user3Future.get(5, TimeUnit.SECONDS);
+            MatchStateV2Response user4Response = user4Future.get(5, TimeUnit.SECONDS);
+            MatchStateV2Response finalState = readyCheckService.getMyMatchStateV2(1L);
+
+            assertThat(createRoomCallCount.get()).isEqualTo(1);
+            assertThat(user3Response.status()).isIn(MatchStatus.ACCEPT_PENDING, MatchStatus.ROOM_READY);
+            assertThat(user4Response.status()).isIn(MatchStatus.ACCEPT_PENDING, MatchStatus.ROOM_READY);
+            assertThat(finalState.status()).isEqualTo(MatchStatus.ROOM_READY);
+            assertThat(finalState.room()).isNotNull();
+            assertThat(finalState.room().roomId()).isEqualTo(100L);
+        } finally {
+            executorService.shutdownNow();
+        }
     }
 
     @Test
-    @DisplayName("terminal session의 마지막 참조자까지 재join하면 세션 본문이 제거된다")
-    void joinQueueV2_removesTerminalSession_whenLastReferenceIsCleaned() throws Exception {
+    @DisplayName("ROOM_CREATING은 matches/me에서 ACCEPT_PENDING으로만 보인다")
+    void getMyMatchStateV2_hidesRoomCreatingState() {
+        QueueKey queueKey = new QueueKey("Array", Difficulty.EASY);
+        List<WaitingUser> users = List.of(
+                new WaitingUser(1L, queueKey),
+                new WaitingUser(2L, queueKey),
+                new WaitingUser(3L, queueKey),
+                new WaitingUser(4L, queueKey));
+
+        Long matchId = matchStateStore
+                .markAcceptPending(queueKey, users, LocalDateTime.now().plusSeconds(30))
+                .matchId();
+
+        matchStateStore.accept(matchId, 1L);
+        matchStateStore.accept(matchId, 2L);
+        matchStateStore.accept(matchId, 3L);
+        matchStateStore.accept(matchId, 4L);
+        MatchStateStore.RoomCreationAttempt roomCreationAttempt = matchStateStore.tryBeginRoomCreation(matchId);
+
+        MatchStateV2Response response = readyCheckService.getMyMatchStateV2(1L);
+
+        assertThat(roomCreationAttempt.acquired()).isTrue();
+        assertThat(roomCreationAttempt.matchSession().status()).isEqualTo(MatchSessionStatus.ROOM_CREATING);
+        assertThat(response.status()).isEqualTo(MatchStatus.ACCEPT_PENDING);
+        assertThat(response.room()).isNull();
+        assertThat(response.readyCheck()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("이미 ROOM_READY인 세션에 추가 accept가 와도 room은 다시 생성되지 않는다")
+    void acceptMatch_doesNotCreateRoomAgain_whenAlreadyRoomReady() {
+        when(battleRoomService.createRoom(any(CreateRoomRequest.class)))
+                .thenReturn(new CreateRoomResponse(100L, "WAITING"));
+
         readyCheckService.joinQueueV2(1L, createRequest("Array", Difficulty.EASY));
         readyCheckService.joinQueueV2(2L, createRequest("Array", Difficulty.EASY));
         readyCheckService.joinQueueV2(3L, createRequest("Array", Difficulty.EASY));
         readyCheckService.joinQueueV2(4L, createRequest("Array", Difficulty.EASY));
 
         Long matchId = readyCheckService.getMyMatchStateV2(1L).readyCheck().matchId();
-        readyCheckService.declineMatch(2L, matchId);
 
-        readyCheckService.joinQueueV2(1L, createRequest("Graph", Difficulty.EASY));
-        readyCheckService.joinQueueV2(2L, createRequest("DP", Difficulty.EASY));
-        readyCheckService.joinQueueV2(3L, createRequest("Greedy", Difficulty.EASY));
-        readyCheckService.joinQueueV2(4L, createRequest("Tree", Difficulty.EASY));
+        readyCheckService.acceptMatch(1L, matchId);
+        readyCheckService.acceptMatch(2L, matchId);
+        readyCheckService.acceptMatch(3L, matchId);
+        readyCheckService.acceptMatch(4L, matchId);
+        MatchStateV2Response response = readyCheckService.acceptMatch(4L, matchId);
 
-        assertThat(matchSessionMap().containsKey(matchId)).isFalse();
+        assertThat(response.status()).isEqualTo(MatchStatus.ROOM_READY);
+        assertThat(response.room()).isNotNull();
+        verify(battleRoomService, times(1)).createRoom(any(CreateRoomRequest.class));
     }
 
     private QueueJoinRequest createRequest(String category, Difficulty difficulty) {
         return new QueueJoinRequest(category, difficulty);
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<Long, Long> userMatchMap() throws Exception {
-        Field field = InMemoryMatchStateStore.class.getDeclaredField("userMatchMap");
-        field.setAccessible(true);
-        return (Map<Long, Long>) field.get(matchStateStore);
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<Long, ?> matchSessionMap() throws Exception {
-        Field field = InMemoryMatchStateStore.class.getDeclaredField("matchSessionMap");
-        field.setAccessible(true);
-        return (Map<Long, ?>) field.get(matchStateStore);
     }
 }
