@@ -31,6 +31,7 @@ import json
 import os
 import re
 import sys
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,27 @@ from typing import Any
 psycopg = None
 
 DEFAULT_LANGUAGES = ["python3", "java", "c", "cpp17", "javascript"]
+
+
+@dataclass
+class SequenceBlockAllocator:
+    """시퀀스 증가폭 단위로 id 블록을 예약하고 로컬에서 순차 배정한다."""
+
+    sequence_name: str
+    block_size: int
+    next_candidate: int | None = None
+    block_end: int | None = None
+
+    def allocate(self, cur: psycopg.Cursor[Any]) -> int:
+        if self.next_candidate is None or self.block_end is None or self.next_candidate > self.block_end:
+            cur.execute("SELECT nextval(%s::regclass)", (self.sequence_name,))
+            block_start = int(cur.fetchone()[0])
+            self.next_candidate = block_start
+            self.block_end = block_start + self.block_size - 1
+
+        allocated_id = self.next_candidate
+        self.next_candidate += 1
+        return allocated_id
 
 
 def ensure_psycopg() -> None:
@@ -110,6 +132,26 @@ def resolve_id_sequence(
         f"Cannot resolve sequence/default for {table_name}.id. "
         "Run BackApplication once to create schema or fix id generation."
     )
+
+
+def resolve_sequence_increment(cur: psycopg.Cursor[Any], sequence_name: str) -> int:
+    """시퀀스 increment 값을 조회한다."""
+    cur.execute(
+        """
+        SELECT seqincrement
+        FROM pg_catalog.pg_sequence
+        WHERE seqrelid = %s::regclass
+        """,
+        (sequence_name,),
+    )
+    row = cur.fetchone()
+    if not row or row[0] is None:
+        raise RuntimeError(f"Cannot resolve increment for sequence: {sequence_name}")
+
+    increment = int(row[0])
+    if increment <= 0:
+        raise RuntimeError(f"Invalid increment {increment} for sequence: {sequence_name}")
+    return increment
 
 
 def slugify(text: str, max_len: int = 40) -> str:
@@ -250,25 +292,40 @@ def resolve_starter(
 
 def upsert_profile(
     cur: psycopg.Cursor[Any],
-    id_sequence: str | None,
+    id_allocator: SequenceBlockAllocator | None,
     problem_id: int,
     language_code: str,
     starter_code: str,
     is_default: bool,
 ) -> None:
-    if id_sequence:
+    # update가 먼저 성공하면 id를 새로 소비하지 않는다.
+    cur.execute(
+        """
+        UPDATE problem_language_profiles
+        SET starter_code = %s,
+            is_default = %s
+        WHERE problem_id = %s
+          AND language_code = %s
+        """,
+        (starter_code, is_default, problem_id, language_code),
+    )
+    if cur.rowcount:
+        return
+
+    if id_allocator:
+        allocated_id = id_allocator.allocate(cur)
         cur.execute(
-            f"""
+            """
             INSERT INTO problem_language_profiles
                 (id, problem_id, language_code, starter_code, is_default)
             VALUES
-                (nextval('{id_sequence}'), %s, %s, %s, %s)
+                (%s, %s, %s, %s, %s)
             ON CONFLICT (problem_id, language_code)
             DO UPDATE SET
                 starter_code = EXCLUDED.starter_code,
                 is_default = EXCLUDED.is_default
             """,
-            (problem_id, language_code, starter_code, is_default),
+            (allocated_id, problem_id, language_code, starter_code, is_default),
         )
     else:
         cur.execute(
@@ -415,6 +472,12 @@ def main() -> int:
                 "problem_language_profiles",
                 ("problem_language_profile_id_seq",),
             )
+            profile_id_allocator: SequenceBlockAllocator | None = None
+            if profile_id_seq:
+                profile_id_allocator = SequenceBlockAllocator(
+                    sequence_name=profile_id_seq,
+                    block_size=resolve_sequence_increment(cur, profile_id_seq),
+                )
 
             query, params = build_problem_query(problem_ids, args.limit)
             cur.execute(query, params)
@@ -425,7 +488,10 @@ def main() -> int:
             stats["problems_targeted"] = len(rows)
 
             if args.truncate and not args.dry_run:
-                cur.execute("TRUNCATE TABLE problem_language_profiles RESTART IDENTITY")
+                cur.execute("TRUNCATE TABLE problem_language_profiles")
+                if profile_id_seq:
+                    # JPA sequence는 table-owned identity가 아니므로 명시적으로 초기화한다.
+                    cur.execute("SELECT setval(%s::regclass, 1, false)", (profile_id_seq,))
 
             for problem_id, source_problem_id, title in rows:
                 for language in languages:
@@ -443,7 +509,7 @@ def main() -> int:
 
                     upsert_profile(
                         cur,
-                        id_sequence=profile_id_seq,
+                        id_allocator=profile_id_allocator,
                         problem_id=int(problem_id),
                         language_code=language,
                         starter_code=starter,
