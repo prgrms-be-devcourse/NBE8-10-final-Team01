@@ -23,6 +23,9 @@ public class JwtProvider {
     @Value("${jwt.expiration}")
     private long expiration; // ms 단위
 
+    @Value("${jwt.refresh-expiration}")
+    private long refreshExpiration; // ms 단위
+
     private SecretKey key;
 
     // 의존성 주입 완료 후, JWT 서명에 사용할 HMAC-SHA 키를 생성
@@ -43,6 +46,21 @@ public class JwtProvider {
                 .expiration(new Date(now.getTime() + expiration))
                 .signWith(key, Jwts.SIG.HS256)
                 .compact();
+    }
+
+    // refreshToken 생성 — memberId만 담아 최소화
+    public String createRefreshToken(Long memberId) {
+        Date now = new Date();
+        return Jwts.builder()
+                .subject(String.valueOf(memberId))
+                .issuedAt(now)
+                .expiration(new Date(now.getTime() + refreshExpiration))
+                .signWith(key, Jwts.SIG.HS256)
+                .compact();
+    }
+
+    public long getRefreshExpiration() {
+        return refreshExpiration;
     }
 
     // 토큰 파싱

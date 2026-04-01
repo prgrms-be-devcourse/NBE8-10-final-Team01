@@ -6,10 +6,12 @@ import com.back.domain.battle.result.dto.MyBattleResultsResponse;
 import com.back.domain.battle.result.service.BattleResultService;
 import com.back.domain.member.member.dto.JoinRequest;
 import com.back.domain.member.member.dto.LoginRequest;
+import com.back.domain.member.member.dto.LoginTokens;
 import com.back.domain.member.member.dto.MyInfoResponse;
 import com.back.domain.member.member.entity.Member;
 import com.back.domain.member.member.service.MemberService;
 import com.back.global.exception.ServiceException;
+import com.back.global.jwt.RefreshTokenService;
 import com.back.global.rq.Rq;
 import com.back.global.rsData.RsData;
 
@@ -22,6 +24,7 @@ import lombok.RequiredArgsConstructor;
 public class MemberController {
     private final MemberService memberService;
     private final BattleResultService battleResultService;
+    private final RefreshTokenService refreshTokenService;
     private final Rq rq;
 
     // 회원가입
@@ -33,15 +36,21 @@ public class MemberController {
     // 로그인 — 발급된 토큰을 HttpOnly 쿠키에 저장
     @PostMapping("/login")
     public RsData<Void> login(@Valid @RequestBody LoginRequest req) {
-        String accessToken = memberService.login(req);
-        rq.setCookie("accessToken", accessToken);
+        LoginTokens tokens = memberService.login(req);
+        rq.setCookie("accessToken", tokens.accessToken());
+        rq.setCookie("refreshToken", tokens.refreshToken());
         return RsData.of("200", "로그인 성공");
     }
 
-    // 로그아웃 — accessToken 쿠키 만료
+    // 로그아웃 — 두 쿠키 만료 + Redis refreshToken 삭제
     @PostMapping("/logout")
     public RsData<Void> logout() {
+        Member actor = rq.getActor();
+        if (actor != null) {
+            refreshTokenService.delete(actor.getId());
+        }
         rq.deleteCookie("accessToken");
+        rq.deleteCookie("refreshToken");
         return RsData.of("200", "로그아웃 성공");
     }
 
