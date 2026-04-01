@@ -49,7 +49,10 @@ public class AuthController {
                 .orElseThrow(() -> new ServiceException("AUTH_404", "존재하지 않는 회원입니다"));
 
         String newAccessToken = jwtProvider.createToken(
-                member.getId(), member.getEmail(), member.getNickname(), member.getRole().getKey());
+                member.getId(),
+                member.getEmail(),
+                member.getNickname(),
+                member.getRole().getKey());
 
         rq.setCookie("accessToken", newAccessToken);
         return RsData.of("200", "accessToken이 재발급되었습니다");
