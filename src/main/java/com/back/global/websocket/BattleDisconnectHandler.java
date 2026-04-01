@@ -48,9 +48,11 @@ public class BattleDisconnectHandler {
             return;
         }
 
+        Long memberId = user.getId();
+
         battleParticipantRepository.findPlayingParticipantByMemberId(memberId).ifPresent(participant -> {
             Long roomId = participant.getBattleRoom().getId();
-        }
+
             participant.abandon();
             battleParticipantRepository.save(participant);
 
