@@ -24,7 +24,9 @@ import com.back.domain.matching.queue.model.WaitingUser;
 import com.back.domain.matching.queue.store.MatchStateStore;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 /**
@@ -46,6 +48,7 @@ public class ReadyCheckService {
     private final BattleRoomService battleRoomService;
     private final QueueProblemPicker queueProblemPicker;
     private final MatchStateStore matchStateStore;
+    private final MatchingEventPublisher matchingEventPublisher;
 
     /**
      * v2 큐 참가
@@ -63,6 +66,7 @@ public class ReadyCheckService {
         int currentSize = matchStateStore.enqueue(userId, nickname, queueKey);
 
         if (currentSize < REQUIRED_MATCH_SIZE) {
+            matchingEventPublisher.publishQueueStateChanged(queueKey, currentSize);
             // 아직 4명이 안 찼다면 기존 SEARCHING 단계로 머문다.
             return new QueueStatusResponse(
                     "매칭 대기열에 참가했습니다.",
@@ -72,7 +76,17 @@ public class ReadyCheckService {
         }
 
         // 4명이 찬 시점에만 SEARCHING -> ACCEPT_PENDING 전환을 시도한다.
-        tryCreateReadyCheckSession(queueKey);
+        MatchSession matchSession = tryCreateReadyCheckSession(queueKey);
+
+        if (matchSession != null) {
+            publishReadyCheckStarted(matchSession);
+
+            int remainingCount = matchStateStore.getWaitingCount(queueKey);
+            if (remainingCount > 0) {
+                // 예: user1~4가 handoff 되고 user5가 queue에 남아 있다면 남은 대기 인원도 즉시 갱신해준다.
+                matchingEventPublisher.publishQueueStateChanged(queueKey, remainingCount);
+            }
+        }
 
         return new QueueStatusResponse(
                 "매칭이 성사되어 수락 대기 상태로 전환되었습니다.",
@@ -85,6 +99,7 @@ public class ReadyCheckService {
         // cancel은 아직 queue에 남아 있는 SEARCHING 사용자만 대상으로 한다.
         MatchStateStore.CancelResult cancelResult = matchStateStore.cancel(userId);
         QueueKey queueKey = cancelResult.queueKey();
+        matchingEventPublisher.publishQueueStateChanged(queueKey, cancelResult.waitingCount());
 
         return new QueueStatusResponse(
                 "매칭 대기열에서 취소했습니다.", queueKey.category(), queueKey.difficulty().name(), cancelResult.waitingCount());
@@ -162,23 +177,34 @@ public class ReadyCheckService {
      * 이 시점에는 아직 problem pick이나 room 생성이 일어나지 않는다.
      * ready-check가 실패할 수 있기 때문에, 방 생성은 마지막 accept까지 미룬다.
      */
-    private void tryCreateReadyCheckSession(QueueKey queueKey) {
+    private MatchSession tryCreateReadyCheckSession(QueueKey queueKey) {
         List<WaitingUser> matchedUsers = matchStateStore.pollMatchCandidates(queueKey, REQUIRED_MATCH_SIZE);
 
         if (matchedUsers == null) {
-            return;
+            return null;
         }
 
         LocalDateTime deadline = LocalDateTime.now().plusSeconds(READY_CHECK_TIMEOUT_SECONDS);
 
         try {
             // 이 시점에 userQueueMap에서 빠지고 userMatchMap / matchSessionMap으로 이동한다.
-            matchStateStore.markAcceptPending(queueKey, matchedUsers, deadline);
+            return matchStateStore.markAcceptPending(queueKey, matchedUsers, deadline);
         } catch (RuntimeException e) {
             // 세션 생성 도중 실패하면 poll했던 유저들을 다시 queue 앞쪽으로 복구한다.
             matchStateStore.rollbackPolledUsers(queueKey, matchedUsers);
+            matchingEventPublisher.publishQueueStateChanged(queueKey, matchStateStore.getWaitingCount(queueKey));
             throw e;
         }
+    }
+
+    private void publishReadyCheckStarted(MatchSession matchSession) {
+        log.info("READY_CHECK_STARTED handoff 준비 - participants={}", matchSession.participantIds());
+        // handoff 는 같은 세션 참여자 4명에게만 개인 채널로 보낸다.
+        // 예: [1,2,3,4]가 매칭되면 /user/queue/matching 으로 각각 ACCEPT_PENDING snapshot 을 받는다.
+        matchSession
+                .participantIds()
+                .forEach(participantId -> matchingEventPublisher.publishReadyCheckStarted(
+                        participantId, toMatchStateV2Response(participantId, matchSession)));
     }
 
     /**
@@ -196,7 +222,6 @@ public class ReadyCheckService {
         }
 
         // readyCheck / room / message를 나눠 담아두면 프론트가 상태별 UI를 단순하게 분기할 수 있다.
-        // TODO : 내가 생각했을땐 이거 닉네임 그냥 jwt에서 받아 쓰면 이거 필요없을거같음
         ReadyCheckSnapshot readyCheckSnapshot = buildReadyCheckSnapshot(userId, matchSession);
         RoomSnapshot roomSnapshot = matchSession.roomId() == null ? null : new RoomSnapshot(matchSession.roomId());
         String message = resolveMessage(matchSession);
