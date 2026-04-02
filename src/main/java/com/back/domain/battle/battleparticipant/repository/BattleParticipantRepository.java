@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import com.back.domain.battle.battleparticipant.entity.BattleParticipant;
+import com.back.domain.battle.battleparticipant.entity.BattleParticipantStatus;
 import com.back.domain.battle.battleroom.entity.BattleRoom;
 import com.back.domain.battle.battleroom.entity.BattleRoomStatus;
 import com.back.domain.member.member.entity.Member;
@@ -67,8 +68,28 @@ public interface BattleParticipantRepository extends JpaRepository<BattlePartici
             select p from BattleParticipant p
             join fetch p.battleRoom r
             where p.member.id = :memberId
-              and p.status = com.back.domain.battle.battleparticipant.entity.BattleParticipantStatus.PLAYING
-              and r.status = com.back.domain.battle.battleroom.entity.BattleRoomStatus.PLAYING
+              and p.status = :status
+              and r.status = :roomStatus
             """)
-    Optional<BattleParticipant> findPlayingParticipantByMemberId(@Param("memberId") Long memberId);
+    Optional<BattleParticipant> findPlayingParticipantByMemberId(
+            @Param("memberId") Long memberId,
+            @Param("status") BattleParticipantStatus status,
+            @Param("roomStatus") BattleRoomStatus roomStatus);
+
+    /**
+     * 현재 배틀 중인 방에서 ABANDONED 상태인 특정 유저의 참여자 정보를 조회
+     * 네트워크 이탈로 ABANDONED된 유저가 사이트에 재접속했을 때 진행 중인 방이 있는지 확인하는 용도
+     * join fetch p.battleRoom을 쓰는 이유는 서비스에서 roomId를 꺼낼 때 N+1 방지
+     */
+    @Query("""
+            select p from BattleParticipant p
+            join fetch p.battleRoom r
+            where p.member.id = :memberId
+              and p.status = :status
+              and r.status = :roomStatus
+            """)
+    Optional<BattleParticipant> findAbandonedParticipantByMemberId(
+            @Param("memberId") Long memberId,
+            @Param("status") BattleParticipantStatus status,
+            @Param("roomStatus") BattleRoomStatus roomStatus);
 }

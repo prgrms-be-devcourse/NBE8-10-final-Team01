@@ -4,5 +4,6 @@ public enum BattleParticipantStatus {
     READY,
     PLAYING,
     EXIT,
-    ABANDONED
+    ABANDONED,
+    QUIT
 }

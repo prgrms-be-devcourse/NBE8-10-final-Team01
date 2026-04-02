@@ -10,7 +10,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.socket.messaging.SessionDisconnectEvent;
 
+import com.back.domain.battle.battleparticipant.entity.BattleParticipantStatus;
 import com.back.domain.battle.battleparticipant.repository.BattleParticipantRepository;
+import com.back.domain.battle.battleroom.entity.BattleRoomStatus;
 import com.back.global.security.SecurityUser;
 
 import lombok.RequiredArgsConstructor;
@@ -50,16 +52,18 @@ public class BattleDisconnectHandler {
 
         Long memberId = user.getId();
 
-        battleParticipantRepository.findPlayingParticipantByMemberId(memberId).ifPresent(participant -> {
-            Long roomId = participant.getBattleRoom().getId();
+        battleParticipantRepository
+                .findPlayingParticipantByMemberId(memberId, BattleParticipantStatus.PLAYING, BattleRoomStatus.PLAYING)
+                .ifPresent(participant -> {
+                    Long roomId = participant.getBattleRoom().getId();
 
-            participant.abandon();
-            battleParticipantRepository.save(participant);
+                    participant.abandon();
+                    battleParticipantRepository.save(participant);
 
-            log.info("배틀 이탈 처리 - memberId={}, roomId={}", memberId, roomId);
+                    log.info("배틀 이탈 처리 - memberId={}, roomId={}", memberId, roomId);
 
-            messagingTemplate.convertAndSend(
-                    "/topic/room/" + roomId, Map.of("type", "PARTICIPANT_LEFT", "userId", memberId));
-        });
+                    messagingTemplate.convertAndSend(
+                            "/topic/room/" + roomId, Map.of("type", "PARTICIPANT_LEFT", "userId", memberId));
+                });
     }
 }
