@@ -63,6 +63,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                     if (principal instanceof UsernamePasswordAuthenticationToken cookieAuth
                             && cookieAuth.getPrincipal() instanceof SecurityUser cookieUser) {
                         // ① 쿠키 기반: Spring이 이미 Principal을 전파해둔 상태
+                        accessor.setUser(createWsAuthentication(cookieUser));
                         log.info("WebSocket 연결 (쿠키 인증) - memberId={}", cookieUser.getId());
 
                     } else {
@@ -83,9 +84,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                         }
 
                         // 검증 성공: SecurityUser를 STOMP Principal로 등록
-                        UsernamePasswordAuthenticationToken auth =
-                                new UsernamePasswordAuthenticationToken(tokenUser, null, tokenUser.getAuthorities());
-                        accessor.setUser(auth);
+                        accessor.setUser(createWsAuthentication(tokenUser));
                         log.info("WebSocket 연결 (토큰 인증) - memberId={}", tokenUser.getId());
                     }
                 }
@@ -93,6 +92,17 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                 return message;
             }
         });
+    }
+
+    private UsernamePasswordAuthenticationToken createWsAuthentication(SecurityUser securityUser) {
+        // /user 목적지는 Principal name 으로 대상을 찾기 때문에,
+        // matching handoff 는 memberId 기반으로 주소를 맞추도록 이름을 userId 문자열로 고정한다.
+        return new UsernamePasswordAuthenticationToken(securityUser, null, securityUser.getAuthorities()) {
+            @Override
+            public String getName() {
+                return String.valueOf(securityUser.getId());
+            }
+        };
     }
 
     /**
@@ -119,6 +129,9 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
         // 클라이언트가 서버로 메시지를 보낼 때 쓰는 prefix
         registry.setApplicationDestinationPrefixes("/app");
+        // 사용자별 matching handoff는 /user/queue/matching 으로 보낸다.
+        // 예: memberId=1 사용자는 /user/queue/matching 을 구독하고 개인 이벤트만 받는다.
+        registry.setUserDestinationPrefix("/user");
     }
 
     @Override

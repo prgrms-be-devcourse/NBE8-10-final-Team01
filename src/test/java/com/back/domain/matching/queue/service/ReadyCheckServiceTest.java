@@ -3,7 +3,9 @@ package com.back.domain.matching.queue.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -20,6 +22,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import com.back.domain.battle.battleroom.dto.CreateRoomRequest;
 import com.back.domain.battle.battleroom.dto.CreateRoomResponse;
@@ -42,9 +45,10 @@ class ReadyCheckServiceTest {
     private final BattleRoomService battleRoomService = mock(BattleRoomService.class);
     private final QueueProblemPicker queueProblemPicker = mock(QueueProblemPicker.class);
     private final InMemoryMatchStateStore matchStateStore = new InMemoryMatchStateStore();
+    private final MatchingEventPublisher matchingEventPublisher = mock(MatchingEventPublisher.class);
 
     private final ReadyCheckService readyCheckService =
-            new ReadyCheckService(battleRoomService, queueProblemPicker, matchStateStore);
+            new ReadyCheckService(battleRoomService, queueProblemPicker, matchStateStore, matchingEventPublisher);
 
     @BeforeEach
     void setUp() {
@@ -64,6 +68,20 @@ class ReadyCheckServiceTest {
         assertThat(queueState.difficulty()).isEqualTo("EASY");
         assertThat(queueState.waitingCount()).isEqualTo(1);
         assertThat(queueState.requiredCount()).isEqualTo(4);
+        verify(matchingEventPublisher).publishQueueStateChanged(any(QueueKey.class), eq(1));
+    }
+
+    @Test
+    @DisplayName("queue cancel 후에는 감소한 waitingCount를 queue topic 이벤트로 발행한다")
+    void cancelQueueV2_publishesQueueStateChanged() {
+        joinUser(1L);
+        joinUser(2L);
+
+        QueueStatusResponse response = readyCheckService.cancelQueueV2(2L);
+
+        assertThat(response.getWaitingCount()).isEqualTo(1);
+        verify(matchingEventPublisher, times(2)).publishQueueStateChanged(any(QueueKey.class), eq(1));
+        verify(matchingEventPublisher, times(1)).publishQueueStateChanged(any(QueueKey.class), eq(2));
     }
 
     @Test
@@ -88,6 +106,33 @@ class ReadyCheckServiceTest {
         assertThat(response.readyCheck().participants())
                 .extracting(participant -> participant.nickname())
                 .containsExactly("m1", "m2", "m3", "m4");
+        verify(matchingEventPublisher, never()).publishQueueStateChanged(any(QueueKey.class), eq(4));
+    }
+
+    @Test
+    @DisplayName("4번째 join 시 matched 4명에게 READY_CHECK_STARTED를 발행한다")
+    void joinQueueV2_publishesReadyCheckStarted_whenFourthUserJoins() {
+        joinUser(1L);
+        joinUser(2L);
+        joinUser(3L);
+
+        readyCheckService.joinQueueV2(4L, "m4", createRequest("Array", Difficulty.EASY));
+
+        ArgumentCaptor<Long> userIdCaptor = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<MatchStateV2Response> responseCaptor = ArgumentCaptor.forClass(MatchStateV2Response.class);
+
+        verify(matchingEventPublisher, times(4))
+                .publishReadyCheckStarted(userIdCaptor.capture(), responseCaptor.capture());
+
+        assertThat(userIdCaptor.getAllValues()).containsExactlyInAnyOrder(1L, 2L, 3L, 4L);
+        assertThat(responseCaptor.getAllValues()).allSatisfy(response -> {
+            assertThat(response.status()).isEqualTo(MatchStatus.ACCEPT_PENDING);
+            assertThat(response.readyCheck()).isNotNull();
+            assertThat(response.readyCheck().acceptedCount()).isEqualTo(0);
+            assertThat(response.readyCheck().requiredCount()).isEqualTo(4);
+            assertThat(response.room()).isNull();
+            assertThat(response.message()).isNull();
+        });
     }
 
     @Test
@@ -303,6 +348,35 @@ class ReadyCheckServiceTest {
         assertThat(response.status()).isEqualTo(MatchStatus.ROOM_READY);
         assertThat(response.room()).isNotNull();
         verify(battleRoomService, times(1)).createRoom(any(CreateRoomRequest.class));
+    }
+
+    @Test
+    @DisplayName("ready-check 세션 생성 실패 시 rollback 후 queue waitingCount 복구 이벤트를 발행한다")
+    void joinQueueV2_publishesRecoveredQueueEvent_whenMarkAcceptPendingFails() {
+        MatchStateStore failingStore = mock(MatchStateStore.class);
+        MatchingEventPublisher failingPublisher = mock(MatchingEventPublisher.class);
+        ReadyCheckService failingService =
+                new ReadyCheckService(battleRoomService, queueProblemPicker, failingStore, failingPublisher);
+        QueueKey queueKey = new QueueKey("Array", Difficulty.EASY);
+        List<WaitingUser> users = List.of(
+                new WaitingUser(1L, "m1", queueKey),
+                new WaitingUser(2L, "m2", queueKey),
+                new WaitingUser(3L, "m3", queueKey),
+                new WaitingUser(4L, "m4", queueKey));
+
+        when(failingStore.enqueue(1L, "m1", queueKey)).thenReturn(4);
+        when(failingStore.pollMatchCandidates(queueKey, 4)).thenReturn(users);
+        when(failingStore.markAcceptPending(any(QueueKey.class), anyList(), any(LocalDateTime.class)))
+                .thenThrow(new RuntimeException("mark failed"));
+        when(failingStore.getWaitingCount(queueKey)).thenReturn(4);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> failingService.joinQueueV2(1L, "m1", createRequest("Array", Difficulty.EASY)))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("mark failed");
+
+        verify(failingStore).rollbackPolledUsers(queueKey, users);
+        verify(failingPublisher).publishQueueStateChanged(queueKey, 4);
     }
 
     private QueueJoinRequest createRequest(String category, Difficulty difficulty) {
