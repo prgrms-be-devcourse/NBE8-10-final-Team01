@@ -120,7 +120,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         ((ThreadPoolTaskScheduler) scheduler).initialize();
 
         // 클라이언트가 서버로부터 메시지를 받기 위해 구독하는 prefix
-        registry.enableSimpleBroker("/topic")
+        registry.enableSimpleBroker("/topic", "/queue")
                 .setHeartbeatValue(new long[] {10000, 10000}) // 10초마다 ping/pong
                 .setTaskScheduler(scheduler);
         // 서버 → 클라이언트: 10초마다 ping
