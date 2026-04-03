@@ -124,7 +124,6 @@ jobs:
       - name: AWS SSM 배포
         run: |
           DEPLOY_SCRIPT=$(cat << 'SCRIPT_EOF'
-            #!/bin/bash
             set -Eeuo pipefail
 
             # 실행 로그 (타임스탬프 부착)
@@ -299,7 +298,7 @@ jobs:
           SCRIPT_EOF
           )
 
-          PARAMS=$(jq -nc --arg s "$DEPLOY_SCRIPT" '{"commands":[$s]}')
+          PARAMS=$(jq -nc --arg s "$DEPLOY_SCRIPT" '{"commands":["bash << '\''ENDBASH'\''", $s, "ENDBASH"]}')
 
           COMMAND_ID=$(aws ssm send-command \
             --region "${{ secrets.AWS_REGION }}" \
