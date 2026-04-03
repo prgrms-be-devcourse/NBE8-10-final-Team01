@@ -16,7 +16,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 
 import com.back.domain.battle.battleparticipant.entity.BattleParticipant;
 import com.back.domain.battle.battleparticipant.entity.BattleParticipantStatus;
@@ -33,6 +32,7 @@ import com.back.domain.problem.testcase.entity.TestCase;
 import com.back.global.judge.dto.Judge0SubmitResponse;
 import com.back.global.judge.dto.Judge0SubmitResponse.Status;
 import com.back.global.judge.event.JudgeRequestedEvent;
+import com.back.global.websocket.pubsub.WebSocketMessagePublisher;
 
 class JudgeServiceTest {
 
@@ -42,7 +42,7 @@ class JudgeServiceTest {
     private final BattleRoomRepository battleRoomRepository = mock(BattleRoomRepository.class);
     private final MemberRepository memberRepository = mock(MemberRepository.class);
     private final BattleResultService battleResultService = mock(BattleResultService.class);
-    private final SimpMessagingTemplate messagingTemplate = mock(SimpMessagingTemplate.class);
+    private final WebSocketMessagePublisher publisher = mock(WebSocketMessagePublisher.class);
 
     private final JudgeService judgeService = new JudgeService(
             judge0ExecutionService,
@@ -51,7 +51,7 @@ class JudgeServiceTest {
             battleRoomRepository,
             memberRepository,
             battleResultService,
-            messagingTemplate);
+            publisher);
 
     private static final Long SUBMISSION_ID = 1L;
     private static final Long ROOM_ID = 10L;
@@ -268,7 +268,7 @@ class JudgeServiceTest {
         judgeService.onJudgeRequested(event(List.of(tc)));
 
         ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
-        verify(messagingTemplate).convertAndSend(eq("/topic/room/" + ROOM_ID), captor.capture());
+        verify(publisher).publish(eq("/topic/room/" + ROOM_ID), captor.capture());
 
         Map<String, Object> message = captor.getValue();
         assertThat(message.get("type")).isEqualTo("SUBMISSION");

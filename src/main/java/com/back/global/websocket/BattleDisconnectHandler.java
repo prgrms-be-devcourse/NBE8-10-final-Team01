@@ -4,7 +4,6 @@ import java.security.Principal;
 import java.util.Map;
 
 import org.springframework.context.event.EventListener;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -14,6 +13,7 @@ import com.back.domain.battle.battleparticipant.entity.BattleParticipantStatus;
 import com.back.domain.battle.battleparticipant.repository.BattleParticipantRepository;
 import com.back.domain.battle.battleroom.entity.BattleRoomStatus;
 import com.back.global.security.SecurityUser;
+import com.back.global.websocket.pubsub.WebSocketMessagePublisher;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -24,7 +24,7 @@ import lombok.extern.slf4j.Slf4j;
 public class BattleDisconnectHandler {
 
     private final BattleParticipantRepository battleParticipantRepository;
-    private final SimpMessagingTemplate messagingTemplate;
+    private final WebSocketMessagePublisher publisher;
 
     /**
      * WebSocket 연결이 끊길 때 Spring이 자동으로 발생시키는 이벤트 처리.
@@ -62,8 +62,7 @@ public class BattleDisconnectHandler {
 
                     log.info("배틀 이탈 처리 - memberId={}, roomId={}", memberId, roomId);
 
-                    messagingTemplate.convertAndSend(
-                            "/topic/room/" + roomId, Map.of("type", "PARTICIPANT_LEFT", "userId", memberId));
+                    publisher.publish("/topic/room/" + roomId, Map.of("type", "PARTICIPANT_LEFT", "userId", memberId));
                 });
     }
 }

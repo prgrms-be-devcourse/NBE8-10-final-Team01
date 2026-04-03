@@ -14,20 +14,20 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 
 import com.back.domain.problem.run.dto.RunTestCaseResult;
 import com.back.domain.problem.testcase.entity.TestCase;
 import com.back.global.judge.dto.Judge0SubmitResponse;
 import com.back.global.judge.dto.Judge0SubmitResponse.Status;
 import com.back.global.judge.event.RunRequestedEvent;
+import com.back.global.websocket.pubsub.WebSocketMessagePublisher;
 
 class RunJudgeServiceTest {
 
     private final Judge0ExecutionService judge0ExecutionService = mock(Judge0ExecutionService.class);
-    private final SimpMessagingTemplate messagingTemplate = mock(SimpMessagingTemplate.class);
+    private final WebSocketMessagePublisher publisher = mock(WebSocketMessagePublisher.class);
 
-    private final RunJudgeService runJudgeService = new RunJudgeService(judge0ExecutionService, messagingTemplate);
+    private final RunJudgeService runJudgeService = new RunJudgeService(judge0ExecutionService, publisher);
 
     // ── 헬퍼 ──────────────────────────────────────────────────────────────────
 
@@ -55,7 +55,7 @@ class RunJudgeServiceTest {
     @SuppressWarnings("unchecked")
     private List<RunTestCaseResult> captureResults() {
         ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
-        verify(messagingTemplate).convertAndSend(any(String.class), captor.capture());
+        verify(publisher).publish(any(String.class), captor.capture());
         return (List<RunTestCaseResult>) captor.getValue().get("results");
     }
 
@@ -178,7 +178,7 @@ class RunJudgeServiceTest {
 
         runJudgeService.onRunRequested(new RunRequestedEvent(42L, 1L, "code", "python", List.of(tc)));
 
-        verify(messagingTemplate).convertAndSend(eq("/topic/room/42/run"), any(Object.class));
+        verify(publisher).publish(eq("/topic/room/42/run"), any(Object.class));
     }
 
     @Test
@@ -190,7 +190,7 @@ class RunJudgeServiceTest {
         runJudgeService.onRunRequested(new RunRequestedEvent(1L, 99L, "code", "python", List.of(tc)));
 
         ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
-        verify(messagingTemplate).convertAndSend(any(String.class), captor.capture());
+        verify(publisher).publish(any(String.class), captor.capture());
 
         Map<String, Object> message = captor.getValue();
         assertThat(message.get("type")).isEqualTo("RUN_RESULT");

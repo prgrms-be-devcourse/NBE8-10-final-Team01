@@ -4,12 +4,13 @@ import java.util.Map;
 
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.stereotype.Controller;
 
 import com.back.global.security.SecurityUser;
+import com.back.global.websocket.dto.CodeSyncRequest;
 import com.back.global.websocket.dto.CodeUpdateMessage;
+import com.back.global.websocket.pubsub.WebSocketMessagePublisher;
 
 import lombok.RequiredArgsConstructor;
 
@@ -17,7 +18,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class BattleWebSocketHandler {
 
-    private final SimpMessagingTemplate messagingTemplate;
+    private final WebSocketMessagePublisher publisher;
     private final BattleCodeStore battleCodeStore;
 
     /**
@@ -33,14 +34,28 @@ public class BattleWebSocketHandler {
             CodeUpdateMessage message,
             @AuthenticationPrincipal SecurityUser securityUser) {
 
-        messagingTemplate.convertAndSend(
+        publisher.publish(
                 "/topic/room/" + roomId + "/spectate",
-                Map.of(
-                        "type", "CODE_UPDATE",
-                        "userId", securityUser.getId(),
-                        "code", message.code()));
+                Map.of("type", "CODE_UPDATE", "userId", securityUser.getId(), "code", message.code()));
 
-        // 재입장 시 코드 복원을 위해 Redis에 임시 저장
+        // 재입장 및 관전자 동기화를 위해 Redis에 임시 저장
         battleCodeStore.save(roomId, securityUser.getId(), message.code());
+    }
+
+    /**
+     * 관전자가 최신 코드 전체를 요청할 때 호출 (새로고침 등 재동기화)
+     * STOMP SEND /app/room/{roomId}/code/sync
+     * Body: { "targetUserId": 42 }
+     *
+     * Redis에 저장된 플레이어의 현재 코드를 CODE_SYNC로 관전자 채널에 전달
+     */
+    @MessageMapping("/room/{roomId}/code/sync")
+    public void handleSyncRequest(@DestinationVariable Long roomId, CodeSyncRequest request) {
+
+        String code = battleCodeStore.get(roomId, request.targetUserId());
+
+        publisher.publish(
+                "/topic/room/" + roomId + "/spectate",
+                Map.of("type", "CODE_SYNC", "userId", request.targetUserId(), "code", code));
     }
 }

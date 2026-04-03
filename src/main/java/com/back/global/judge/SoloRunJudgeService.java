@@ -3,7 +3,6 @@ package com.back.global.judge;
 import java.util.List;
 import java.util.Map;
 
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.event.TransactionPhase;
@@ -13,6 +12,7 @@ import com.back.domain.problem.testcase.entity.TestCase;
 import com.back.global.judge.dto.Judge0SubmitRequest;
 import com.back.global.judge.dto.Judge0SubmitResponse;
 import com.back.global.judge.event.SoloRunRequestedEvent;
+import com.back.global.websocket.pubsub.WebSocketMessagePublisher;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -24,7 +24,7 @@ public class SoloRunJudgeService {
 
     private final Judge0ExecutionService judge0ExecutionService;
     private final RunJudgeService runJudgeService; // buildResults, resolveStatus 재사용
-    private final SimpMessagingTemplate messagingTemplate;
+    private final WebSocketMessagePublisher publisher;
 
     @Async
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
@@ -36,7 +36,7 @@ public class SoloRunJudgeService {
 
         var results = testCases.isEmpty() ? List.of() : buildAndRun(code, language, testCases);
 
-        messagingTemplate.convertAndSend(
+        publisher.publish(
                 "/topic/solo/" + memberId + "/run",
                 Map.of(
                         "type", "RUN_RESULT",
