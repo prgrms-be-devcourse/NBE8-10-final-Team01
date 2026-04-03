@@ -29,17 +29,8 @@ RUN chmod +x gradlew && ./gradlew dependencies --no-daemon
 
 COPY src src
 
-# PG 초기화 → 시작 → 테스트 DB 생성 + pgvector 확장 → 빌드(테스트 포함) → PG 종료
-RUN set -e \
- && PGDATA=/var/lib/postgresql/data \
- && mkdir -p "$PGDATA" && chown postgres:postgres "$PGDATA" \
- && su postgres -c "initdb -D $PGDATA --auth=trust" \
- && su postgres -c "pg_ctl -D $PGDATA start -o '-c listen_addresses=localhost' -w" \
- && su postgres -c "psql -c \"CREATE USER algo_user WITH PASSWORD 'algo_pass';\"" \
- && su postgres -c "psql -c \"CREATE DATABASE algo_db OWNER algo_user;\"" \
- && su postgres -c "psql -d algo_db -c \"CREATE EXTENSION IF NOT EXISTS vector;\"" \
- && ./gradlew build --no-daemon \
- && su postgres -c "pg_ctl -D $PGDATA stop -w"
+# 테스트 제외 빌드 (테스트는 CI에서 별도 실행)
+RUN ./gradlew build -x test --no-daemon
 
 # =========================
 # 2. Layer Extract Stage
