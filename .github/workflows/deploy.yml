@@ -132,10 +132,6 @@ jobs:
             exec > >(awk '{ fflush(); print strftime("[%Y-%m-%d %H:%M:%S]"), $0 }' | tee -a "$LOG")
             exec 2> >(awk '{ fflush(); print strftime("[%Y-%m-%d %H:%M:%S]"), $0 }' | tee -a "$LOG" >&2)
 
-            cp "$0" "/tmp/blue_green.${SCRIPT_TS}.sh"
-            cp "$0" "/tmp/blue_green.sh"
-            chmod 755 "/tmp/blue_green.${SCRIPT_TS}.sh" "/tmp/blue_green.sh"
-
             # jq 설치 확인 (없으면 설치)
             which jq || apt-get install -y jq -qq
 
