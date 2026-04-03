@@ -14,7 +14,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 
 import com.back.domain.battle.battleparticipant.entity.BattleParticipant;
 import com.back.domain.battle.battleparticipant.entity.BattleParticipantStatus;
@@ -27,6 +26,7 @@ import com.back.domain.member.member.repository.MemberRepository;
 import com.back.domain.problem.problem.entity.Problem;
 import com.back.domain.problem.submission.repository.SubmissionRepository;
 import com.back.global.exception.ServiceException;
+import com.back.global.websocket.pubsub.WebSocketMessagePublisher;
 
 class BattleResultServiceTest {
 
@@ -34,14 +34,10 @@ class BattleResultServiceTest {
     private final BattleParticipantRepository battleParticipantRepository = mock(BattleParticipantRepository.class);
     private final SubmissionRepository submissionRepository = mock(SubmissionRepository.class);
     private final MemberRepository memberRepository = mock(MemberRepository.class);
-    private final SimpMessagingTemplate messagingTemplate = mock(SimpMessagingTemplate.class);
+    private final WebSocketMessagePublisher publisher = mock(WebSocketMessagePublisher.class);
 
     private final BattleResultService battleResultService = new BattleResultService(
-            battleRoomRepository,
-            battleParticipantRepository,
-            submissionRepository,
-            memberRepository,
-            messagingTemplate);
+            battleRoomRepository, battleParticipantRepository, submissionRepository, memberRepository, publisher);
 
     @Test
     @DisplayName("내 전적 조회 성공 시 battleResults와 pageInfo를 반환한다")
