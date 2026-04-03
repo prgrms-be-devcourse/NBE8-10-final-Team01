@@ -26,7 +26,7 @@ on:
       - "settings.gradle.kts"
       - "Dockerfile"
     branches:
-      - main
+      - dev # 테스트용. 완료 후 main으로 변경
 
 permissions:
   contents: write
