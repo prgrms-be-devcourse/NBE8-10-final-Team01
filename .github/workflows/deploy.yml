@@ -124,6 +124,7 @@ jobs:
       - name: AWS SSM 배포
         run: |
           DEPLOY_SCRIPT=$(cat << 'SCRIPT_EOF'
+            #!/bin/bash
             set -Eeuo pipefail
 
             # 실행 로그 (타임스탬프 부착)
