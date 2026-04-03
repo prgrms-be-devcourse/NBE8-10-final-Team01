@@ -43,7 +43,9 @@ public class SecurityConfig {
                                 // - 배포 환경: cross-origin으로 쿠키 자동 전송 불가 → 쿠키 없이 핸드셰이크 허용
                                 // 실제 인증 검증은 STOMP CONNECT 단계에서 ChannelInterceptor가 담당
                                 // (쿠키 기반 Principal 전파 또는 X-WS-Token 1회용 토큰 검증)
-                                "/ws/**")
+                                "/ws/**",
+                                "/actuator/health",
+                                "/actuator/prometheus")
                         .permitAll()
                         // 그 외 모든 요청은 인증 필요 (POST /api/v1/ws/token 포함)
                         .anyRequest()
