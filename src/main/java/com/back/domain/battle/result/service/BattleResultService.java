@@ -10,7 +10,6 @@ import java.util.stream.Collectors;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -31,6 +30,7 @@ import com.back.domain.problem.submission.entity.Submission;
 import com.back.domain.problem.submission.entity.SubmissionResult;
 import com.back.domain.problem.submission.repository.SubmissionRepository;
 import com.back.global.exception.ServiceException;
+import com.back.global.websocket.pubsub.WebSocketMessagePublisher;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -51,7 +51,7 @@ public class BattleResultService {
     private final BattleParticipantRepository battleParticipantRepository;
     private final SubmissionRepository submissionRepository;
     private final MemberRepository memberRepository;
-    private final SimpMessagingTemplate messagingTemplate;
+    private final WebSocketMessagePublisher publisher;
 
     @Transactional
     public void settle(Long roomId) {
@@ -106,7 +106,7 @@ public class BattleResultService {
                 // 클라이언트에게 500이 반환되어 DB는 성공했는데 실패로 인식하는 혼란을 유발함.
                 // WebSocket은 실시간 알림 역할이므로 전송 실패가 치명적이지 않아 예외를 삼키고 로그만 남김.
                 try {
-                    messagingTemplate.convertAndSend("/topic/room/" + roomId, Map.of("type", "BATTLE_FINISHED"));
+                    publisher.publish("/topic/room/" + roomId, Map.of("type", "BATTLE_FINISHED"));
                 } catch (Exception e) {
                     log.error("BATTLE_FINISHED WebSocket 전송 실패 roomId={}", roomId, e);
                 }

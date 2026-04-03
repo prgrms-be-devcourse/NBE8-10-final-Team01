@@ -4,7 +4,6 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -28,6 +27,7 @@ import com.back.domain.problem.problem.entity.Problem;
 import com.back.domain.problem.problem.repository.ProblemRepository;
 import com.back.global.exception.ServiceException;
 import com.back.global.websocket.BattleCodeStore;
+import com.back.global.websocket.pubsub.WebSocketMessagePublisher;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -41,7 +41,7 @@ public class BattleRoomService {
     private final BattleParticipantRepository battleParticipantRepository;
     private final ProblemRepository problemRepository;
     private final MemberRepository memberRepository;
-    private final SimpMessagingTemplate messagingTemplate;
+    private final WebSocketMessagePublisher publisher;
     private final BattleCodeStore battleCodeStore;
 
     @Transactional
@@ -122,7 +122,7 @@ public class BattleRoomService {
                         // 클라이언트에게 500이 반환되어 DB는 성공했는데 실패로 인식하는 혼란을 유발함.
                         // WebSocket은 실시간 알림 역할이므로 전송 실패가 치명적이지 않아 예외를 삼키고 로그만 남김.
                         try {
-                            messagingTemplate.convertAndSend(
+                            publisher.publish(
                                     "/topic/room/" + roomId, Map.of("type", "BATTLE_STARTED", "timerEnd", timerEnd));
                         } catch (Exception e) {
                             log.error("BATTLE_STARTED WebSocket 전송 실패 roomId={}", roomId, e);

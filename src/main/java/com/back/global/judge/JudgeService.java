@@ -4,7 +4,6 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.event.TransactionPhase;
@@ -25,6 +24,7 @@ import com.back.domain.problem.testcase.entity.TestCase;
 import com.back.global.judge.dto.Judge0SubmitRequest;
 import com.back.global.judge.dto.Judge0SubmitResponse;
 import com.back.global.judge.event.JudgeRequestedEvent;
+import com.back.global.websocket.pubsub.WebSocketMessagePublisher;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -40,7 +40,7 @@ public class JudgeService {
     private final BattleRoomRepository battleRoomRepository;
     private final MemberRepository memberRepository;
     private final BattleResultService battleResultService;
-    private final SimpMessagingTemplate messagingTemplate;
+    private final WebSocketMessagePublisher publisher;
 
     /**
      * 트랜잭션 커밋 후 비동기 채점 실행.
@@ -105,7 +105,7 @@ public class JudgeService {
         submissionRepository.save(submission);
 
         // WebSocket: 제출 결과 브로드캐스트 (알림)
-        messagingTemplate.convertAndSend(
+        publisher.publish(
                 "/topic/room/" + roomId,
                 Map.of(
                         "type", "SUBMISSION",
@@ -148,7 +148,7 @@ public class JudgeService {
                 .filter(p -> p.getStatus() == BattleParticipantStatus.EXIT)
                 .count();
         // PARTICIPANT_DONE 브로드캐스트
-        messagingTemplate.convertAndSend(
+        publisher.publish(
                 "/topic/room/" + roomId,
                 Map.of("type", "PARTICIPANT_DONE", "userId", memberId, "rank", completedCount));
 
