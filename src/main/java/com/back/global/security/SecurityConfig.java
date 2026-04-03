@@ -45,7 +45,8 @@ public class SecurityConfig {
                                 // (쿠키 기반 Principal 전파 또는 X-WS-Token 1회용 토큰 검증)
                                 "/ws/**",
                                 "/actuator/health",
-                                "/actuator/prometheus")
+                                "/actuator/prometheus",
+                                "/error")
                         .permitAll()
                         // 그 외 모든 요청은 인증 필요 (POST /api/v1/ws/token 포함)
                         .anyRequest()
