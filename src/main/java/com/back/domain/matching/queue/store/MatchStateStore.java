@@ -109,6 +109,16 @@ public interface MatchStateStore {
     MatchSession findMatchSessionByUserId(Long userId);
 
     /**
+     * 만료 스케줄러가 처리할 ACCEPT_PENDING 세션 목록을 조회한다.
+     */
+    List<Long> findExpiredAcceptPendingMatchIds(LocalDateTime now);
+
+    /**
+     * terminal 상태 세션은 이벤트 발행 후 즉시 정리한다.
+     */
+    void clearTerminalMatch(Long matchId);
+
+    /**
      * 방 입장 성공 후 room-ready 세션 연결을 정리한다.
      */
     void clearMatchedRoom(Long userId, Long roomId);

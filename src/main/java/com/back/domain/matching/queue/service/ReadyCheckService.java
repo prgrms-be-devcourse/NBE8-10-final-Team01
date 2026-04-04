@@ -2,6 +2,7 @@ package com.back.domain.matching.queue.service;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.function.BiConsumer;
 
 import org.springframework.stereotype.Service;
 
@@ -132,6 +133,14 @@ public class ReadyCheckService {
     public MatchStateV2Response acceptMatch(Long userId, Long matchId) {
         MatchSession matchSession = matchStateStore.accept(matchId, userId);
 
+        if (matchSession.status() == MatchSessionStatus.EXPIRED) {
+            // 만료 응답은 이벤트 발행 후 즉시 정리해 polling 복구 대상으로 남기지 않는다.
+            MatchStateV2Response response = toMatchStateV2Response(userId, matchSession);
+            publishMatchExpired(matchSession);
+            matchStateStore.clearTerminalMatch(matchId);
+            return response;
+        }
+
         MatchStateStore.RoomCreationAttempt roomCreationAttempt = matchStateStore.tryBeginRoomCreation(matchId);
         matchSession = roomCreationAttempt.matchSession();
 
@@ -146,10 +155,19 @@ public class ReadyCheckService {
                 CreateRoomResponse response = battleRoomService.createRoom(
                         new CreateRoomRequest(problemId, matchSession.participantIds(), REQUIRED_MATCH_SIZE));
                 matchSession = matchStateStore.markRoomReady(matchId, response.roomId());
+                publishRoomReady(matchSession);
             } catch (RuntimeException e) {
                 // 이번 단계에서는 room 생성 실패를 별도 재시도하지 않고 매치를 취소한다.
                 matchSession = matchStateStore.cancelMatch(matchId);
+                MatchStateV2Response response = toMatchStateV2Response(userId, matchSession);
+                publishMatchCancelled(matchSession);
+                matchStateStore.clearTerminalMatch(matchId);
+                return response;
             }
+        }
+
+        if (matchSession.status() == MatchSessionStatus.ACCEPT_PENDING) {
+            publishReadyDecisionChanged(matchSession);
         }
 
         return toMatchStateV2Response(userId, matchSession);
@@ -158,7 +176,17 @@ public class ReadyCheckService {
     public MatchStateV2Response declineMatch(Long userId, Long matchId) {
         // 한 명이 거절하면 ready-check 세션 전체가 CANCELLED로 종료된다.
         MatchSession matchSession = matchStateStore.decline(matchId, userId);
-        return toMatchStateV2Response(userId, matchSession);
+        MatchStateV2Response response = toMatchStateV2Response(userId, matchSession);
+
+        if (matchSession.status() == MatchSessionStatus.EXPIRED) {
+            publishMatchExpired(matchSession);
+            matchStateStore.clearTerminalMatch(matchId);
+        } else if (matchSession.status() == MatchSessionStatus.CANCELLED) {
+            publishMatchCancelled(matchSession);
+            matchStateStore.clearTerminalMatch(matchId);
+        }
+
+        return response;
     }
 
     /**
@@ -169,6 +197,31 @@ public class ReadyCheckService {
      */
     public void clearMatchedRoom(Long userId, Long roomId) {
         matchStateStore.clearMatchedRoom(userId, roomId);
+    }
+
+    public void expireTimedOutMatches() {
+        List<Long> expiredMatchIds = matchStateStore.findExpiredAcceptPendingMatchIds(LocalDateTime.now());
+
+        if (expiredMatchIds.isEmpty()) {
+            return;
+        }
+
+        log.info("MATCH_EXPIRED 정리 - count={}, matchIds={}", expiredMatchIds.size(), expiredMatchIds);
+
+        for (Long matchId : expiredMatchIds) {
+            try {
+                MatchSession matchSession = matchStateStore.expire(matchId);
+
+                if (matchSession.status() != MatchSessionStatus.EXPIRED) {
+                    continue;
+                }
+
+                publishMatchExpired(matchSession);
+                matchStateStore.clearTerminalMatch(matchId);
+            } catch (IllegalStateException ignored) {
+                // 다른 요청이 먼저 정리한 세션은 그대로 건너뛴다.
+            }
+        }
     }
 
     /**
@@ -205,6 +258,30 @@ public class ReadyCheckService {
                 .participantIds()
                 .forEach(participantId -> matchingEventPublisher.publishReadyCheckStarted(
                         participantId, toMatchStateV2Response(participantId, matchSession)));
+    }
+
+    private void publishReadyDecisionChanged(MatchSession matchSession) {
+        publishMatchEvent(matchSession, matchingEventPublisher::publishReadyDecisionChanged);
+    }
+
+    private void publishMatchCancelled(MatchSession matchSession) {
+        publishMatchEvent(matchSession, matchingEventPublisher::publishMatchCancelled);
+    }
+
+    private void publishMatchExpired(MatchSession matchSession) {
+        publishMatchEvent(matchSession, matchingEventPublisher::publishMatchExpired);
+    }
+
+    private void publishRoomReady(MatchSession matchSession) {
+        publishMatchEvent(matchSession, matchingEventPublisher::publishRoomReady);
+    }
+
+    private void publishMatchEvent(MatchSession matchSession, BiConsumer<Long, MatchStateV2Response> publishAction) {
+        // ready-check 상세 이벤트도 참가자별 현재 상태로 각각 전달한다.
+        matchSession
+                .participantIds()
+                .forEach(participantId ->
+                        publishAction.accept(participantId, toMatchStateV2Response(participantId, matchSession)));
     }
 
     /**

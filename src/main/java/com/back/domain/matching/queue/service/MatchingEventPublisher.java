@@ -41,8 +41,34 @@ public class MatchingEventPublisher {
                 new MatchingEventResponse(MatchingEventType.READY_CHECK_STARTED, null, matchState));
     }
 
+    // ready-check 상세 상태 변화는 개인 채널로만 전달한다.
+    public void publishReadyDecisionChanged(Long userId, MatchStateV2Response matchState) {
+        publishUserMatchEvent(userId, MatchingEventType.READY_DECISION_CHANGED, matchState);
+    }
+
+    // 거절 또는 room 생성 실패로 종료된 경우 취소 이벤트를 보낸다.
+    public void publishMatchCancelled(Long userId, MatchStateV2Response matchState) {
+        publishUserMatchEvent(userId, MatchingEventType.MATCH_CANCELLED, matchState);
+    }
+
+    // ready-check 만료는 스케줄러가 감지한 뒤 개인 채널로 전달한다.
+    public void publishMatchExpired(Long userId, MatchStateV2Response matchState) {
+        publishUserMatchEvent(userId, MatchingEventType.MATCH_EXPIRED, matchState);
+    }
+
+    // 방 준비 완료는 battle room 진입 전까지 개인 채널로 전달한다.
+    public void publishRoomReady(Long userId, MatchStateV2Response matchState) {
+        publishUserMatchEvent(userId, MatchingEventType.ROOM_READY, matchState);
+    }
+
     String toQueueTopic(QueueKey queueKey) {
         return "/topic/matching/queue/" + queueKey.category() + "/"
                 + queueKey.difficulty().name();
+    }
+
+    private void publishUserMatchEvent(Long userId, MatchingEventType type, MatchStateV2Response matchState) {
+        log.info("{} 발행 - userId={}, destination={}", type, userId, USER_MATCHING_DESTINATION);
+        messagingTemplate.convertAndSendToUser(
+                String.valueOf(userId), USER_MATCHING_DESTINATION, new MatchingEventResponse(type, null, matchState));
     }
 }

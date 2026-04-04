@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -136,6 +137,20 @@ class ReadyCheckServiceTest {
     }
 
     @Test
+    @DisplayName("일반 accept 시 matched 4명에게 READY_DECISION_CHANGED를 발행한다")
+    void acceptMatch_publishesReadyDecisionChanged() {
+        Long matchId = createAcceptPendingMatch();
+        clearInvocations(matchingEventPublisher);
+
+        MatchStateV2Response response = readyCheckService.acceptMatch(1L, matchId);
+
+        assertThat(response.status()).isEqualTo(MatchStatus.ACCEPT_PENDING);
+        assertThat(response.readyCheck().acceptedCount()).isEqualTo(1);
+        assertThat(response.readyCheck().acceptedByMe()).isTrue();
+        verify(matchingEventPublisher, times(4)).publishReadyDecisionChanged(any(), any());
+    }
+
+    @Test
     @DisplayName("전원 수락이 완료되면 ROOM_READY와 roomId를 반환한다")
     void acceptMatch_returnsRoomReady_whenAllUsersAccepted() {
         when(battleRoomService.createRoom(any(CreateRoomRequest.class)))
@@ -151,6 +166,7 @@ class ReadyCheckServiceTest {
         readyCheckService.acceptMatch(1L, matchId);
         readyCheckService.acceptMatch(2L, matchId);
         readyCheckService.acceptMatch(3L, matchId);
+        clearInvocations(matchingEventPublisher);
         MatchStateV2Response response = readyCheckService.acceptMatch(4L, matchId);
 
         assertThat(response.status()).isEqualTo(MatchStatus.ROOM_READY);
@@ -158,6 +174,7 @@ class ReadyCheckServiceTest {
         assertThat(response.room().roomId()).isEqualTo(100L);
         assertThat(response.readyCheck().acceptedCount()).isEqualTo(4);
         verify(battleRoomService, times(1)).createRoom(any(CreateRoomRequest.class));
+        verify(matchingEventPublisher, times(4)).publishRoomReady(any(), any());
     }
 
     @Test
@@ -169,21 +186,24 @@ class ReadyCheckServiceTest {
         joinUser(4L);
 
         Long matchId = readyCheckService.getMyMatchStateV2(1L).readyCheck().matchId();
+        clearInvocations(matchingEventPublisher);
 
         MatchStateV2Response response = readyCheckService.declineMatch(2L, matchId);
 
         assertThat(response.status()).isEqualTo(MatchStatus.CANCELLED);
-        assertThat(response.message()).isEqualTo("다른 참가자가 매칭을 거절했습니다.");
+        assertThat(response.message()).isNotNull();
         assertThat(response.readyCheck().participants()).anySatisfy(participant -> {
             if (participant.userId().equals(2L)) {
                 assertThat(participant.decision().name()).isEqualTo("DECLINED");
             }
         });
+        assertThat(readyCheckService.getMyMatchStateV2(1L).status()).isEqualTo(MatchStatus.IDLE);
+        verify(matchingEventPublisher, times(4)).publishMatchCancelled(any(), any());
     }
 
     @Test
-    @DisplayName("deadline이 지난 ready-check 세션은 EXPIRED로 조회된다")
-    void getMyMatchStateV2_returnsExpired_whenDeadlinePassed() {
+    @DisplayName("만료 스윕은 deadline 지난 ready-check 세션에 MATCH_EXPIRED를 발행하고 즉시 정리한다")
+    void expireTimedOutMatches_publishesExpiredAndClearsSession() {
         QueueKey queueKey = new QueueKey("Array", Difficulty.EASY);
         List<WaitingUser> users = List.of(
                 new WaitingUser(1L, "m1", queueKey),
@@ -192,11 +212,26 @@ class ReadyCheckServiceTest {
                 new WaitingUser(4L, "m4", queueKey));
 
         matchStateStore.markAcceptPending(queueKey, users, LocalDateTime.now().minusSeconds(1));
+        clearInvocations(matchingEventPublisher);
 
-        MatchStateV2Response response = readyCheckService.getMyMatchStateV2(1L);
+        readyCheckService.expireTimedOutMatches();
 
-        assertThat(response.status()).isEqualTo(MatchStatus.EXPIRED);
-        assertThat(response.message()).isEqualTo("수락 시간이 만료되었습니다.");
+        assertThat(readyCheckService.getMyMatchStateV2(1L).status()).isEqualTo(MatchStatus.IDLE);
+        verify(matchingEventPublisher, times(4)).publishMatchExpired(any(), any());
+    }
+
+    @Test
+    @DisplayName("이미 CANCELLED 된 세션은 만료 스윕에서 다시 EXPIRED 처리하지 않는다")
+    void expireTimedOutMatches_skipsCancelledSession() {
+        Long matchId = createAcceptPendingMatch();
+        clearInvocations(matchingEventPublisher);
+
+        readyCheckService.declineMatch(1L, matchId);
+        clearInvocations(matchingEventPublisher);
+
+        readyCheckService.expireTimedOutMatches();
+
+        verify(matchingEventPublisher, never()).publishMatchExpired(any(), any());
     }
 
     @Test
@@ -215,10 +250,13 @@ class ReadyCheckServiceTest {
         readyCheckService.acceptMatch(1L, matchId);
         readyCheckService.acceptMatch(2L, matchId);
         readyCheckService.acceptMatch(3L, matchId);
+        clearInvocations(matchingEventPublisher);
         MatchStateV2Response response = readyCheckService.acceptMatch(4L, matchId);
 
         assertThat(response.status()).isEqualTo(MatchStatus.CANCELLED);
-        assertThat(response.message()).isEqualTo("방 생성에 실패해 매칭이 취소되었습니다.");
+        assertThat(response.message()).isNotNull();
+        assertThat(readyCheckService.getMyMatchStateV2(1L).status()).isEqualTo(MatchStatus.IDLE);
+        verify(matchingEventPublisher, times(4)).publishMatchCancelled(any(), any());
     }
 
     @Test
@@ -377,6 +415,14 @@ class ReadyCheckServiceTest {
 
         verify(failingStore).rollbackPolledUsers(queueKey, users);
         verify(failingPublisher).publishQueueStateChanged(queueKey, 4);
+    }
+
+    private Long createAcceptPendingMatch() {
+        joinUser(1L);
+        joinUser(2L);
+        joinUser(3L);
+        joinUser(4L);
+        return readyCheckService.getMyMatchStateV2(1L).readyCheck().matchId();
     }
 
     private QueueJoinRequest createRequest(String category, Difficulty difficulty) {

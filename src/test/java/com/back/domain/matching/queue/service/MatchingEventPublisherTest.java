@@ -59,4 +59,52 @@ class MatchingEventPublisherTest {
         assertThat(eventCaptor.getValue().queue()).isNull();
         assertThat(eventCaptor.getValue().match()).isEqualTo(matchState);
     }
+
+    @Test
+    @DisplayName("READY_DECISION_CHANGED 이벤트는 사용자별 matching 채널로 발행된다")
+    void publishReadyDecisionChanged_usesUserDestination() {
+        assertUserEvent(
+                1L, MatchingEventType.READY_DECISION_CHANGED, matchingEventPublisher::publishReadyDecisionChanged);
+    }
+
+    @Test
+    @DisplayName("MATCH_CANCELLED 이벤트는 사용자별 matching 채널로 발행된다")
+    void publishMatchCancelled_usesUserDestination() {
+        assertUserEvent(2L, MatchingEventType.MATCH_CANCELLED, matchingEventPublisher::publishMatchCancelled);
+    }
+
+    @Test
+    @DisplayName("MATCH_EXPIRED 이벤트는 사용자별 matching 채널로 발행된다")
+    void publishMatchExpired_usesUserDestination() {
+        assertUserEvent(3L, MatchingEventType.MATCH_EXPIRED, matchingEventPublisher::publishMatchExpired);
+    }
+
+    @Test
+    @DisplayName("ROOM_READY 이벤트는 사용자별 matching 채널로 발행된다")
+    void publishRoomReady_usesUserDestination() {
+        assertUserEvent(4L, MatchingEventType.ROOM_READY, matchingEventPublisher::publishRoomReady);
+    }
+
+    private void assertUserEvent(Long userId, MatchingEventType eventType, UserEventPublisherAction publisherAction) {
+        MatchStateV2Response matchState = new MatchStateV2Response(MatchStatus.ACCEPT_PENDING, null, null, null);
+        ArgumentCaptor<String> userCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> destinationCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<MatchingEventResponse> eventCaptor = ArgumentCaptor.forClass(MatchingEventResponse.class);
+
+        publisherAction.publish(userId, matchState);
+
+        verify(messagingTemplate)
+                .convertAndSendToUser(userCaptor.capture(), destinationCaptor.capture(), eventCaptor.capture());
+
+        assertThat(userCaptor.getValue()).isEqualTo(String.valueOf(userId));
+        assertThat(destinationCaptor.getValue()).isEqualTo("/queue/matching");
+        assertThat(eventCaptor.getValue().type()).isEqualTo(eventType);
+        assertThat(eventCaptor.getValue().queue()).isNull();
+        assertThat(eventCaptor.getValue().match()).isEqualTo(matchState);
+    }
+
+    @FunctionalInterface
+    private interface UserEventPublisherAction {
+        void publish(Long userId, MatchStateV2Response matchState);
+    }
 }
