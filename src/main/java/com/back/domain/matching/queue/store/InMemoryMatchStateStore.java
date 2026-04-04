@@ -608,17 +608,41 @@ public class InMemoryMatchStateStore implements MatchStateStore {
             return null;
         }
 
-        if (matchSession.isExpiredAt(LocalDateTime.now())) {
-            // 별도 스케줄러 없이 조회 시점에 만료를 반영한다.
-            return expire(matchId);
-        }
-
         if (matchSession.status() == MatchSessionStatus.CLOSED) {
             cleanupStaleUserMatch(userId, matchId);
             return null;
         }
 
+        if (matchSession.status() == MatchSessionStatus.CANCELLED
+                || matchSession.status() == MatchSessionStatus.EXPIRED) {
+            // 즉시 정리 대상 terminal 세션은 조회 복구 대상으로 남기지 않는다.
+            clearTerminalMatch(matchId);
+            return null;
+        }
+
         return matchSession;
+    }
+
+    @Override
+    public List<Long> findExpiredAcceptPendingMatchIds(LocalDateTime now) {
+        return matchSessionMap.values().stream()
+                .filter(matchSession -> matchSession.status() == MatchSessionStatus.ACCEPT_PENDING)
+                .filter(matchSession -> !matchSession.deadline().isAfter(now))
+                .map(MatchSession::matchId)
+                .toList();
+    }
+
+    @Override
+    public void clearTerminalMatch(Long matchId) {
+        MatchSession removedSession = matchSessionMap.remove(matchId);
+
+        if (removedSession != null) {
+            // terminal 세션은 참가자 전체 연결을 한 번에 정리한다.
+            removedSession.participantIds().forEach(participantId -> userMatchMap.remove(participantId, matchId));
+            return;
+        }
+
+        userMatchMap.entrySet().removeIf(entry -> entry.getValue().equals(matchId));
     }
 
     /**
@@ -695,9 +719,8 @@ public class InMemoryMatchStateStore implements MatchStateStore {
         switch (matchSession.status()) {
             case ACCEPT_PENDING, ROOM_READY -> throw new ServiceException("409-1", "이미 진행 중인 매칭이 있습니다.");
             case CANCELLED, EXPIRED, CLOSED -> {
-                // terminal session은 본문이 아직 남아 있으므로 다른 참가자는 계속 matches/me로 종료 상태를 볼 수 있다.
-                // 따라서 세션 전체를 지우지 않고, 다시 join을 누른 현재 사용자 링크만 정리한 뒤 재참가를 허용한다.
-                cleanupTerminalUserMatch(userId, matchId);
+                // 즉시 정리 정책을 쓰므로 남아 있는 terminal 세션은 재참가 전에 함께 치운다.
+                clearTerminalMatch(matchId);
             }
         }
     }
