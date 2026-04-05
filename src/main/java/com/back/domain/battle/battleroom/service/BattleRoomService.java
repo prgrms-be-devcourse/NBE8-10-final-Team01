@@ -21,12 +21,14 @@ import com.back.domain.battle.battleroom.dto.RoomResponse;
 import com.back.domain.battle.battleroom.entity.BattleRoom;
 import com.back.domain.battle.battleroom.entity.BattleRoomStatus;
 import com.back.domain.battle.battleroom.repository.BattleRoomRepository;
+import com.back.domain.battle.result.service.BattleResultService;
 import com.back.domain.member.member.entity.Member;
 import com.back.domain.member.member.repository.MemberRepository;
 import com.back.domain.problem.problem.entity.Problem;
 import com.back.domain.problem.problem.repository.ProblemRepository;
 import com.back.global.exception.ServiceException;
 import com.back.global.websocket.BattleCodeStore;
+import com.back.global.websocket.BattleReconnectStore;
 import com.back.global.websocket.pubsub.WebSocketMessagePublisher;
 
 import lombok.RequiredArgsConstructor;
@@ -43,6 +45,8 @@ public class BattleRoomService {
     private final MemberRepository memberRepository;
     private final WebSocketMessagePublisher publisher;
     private final BattleCodeStore battleCodeStore;
+    private final BattleReconnectStore reconnectStore;
+    private final BattleResultService battleResultService;
 
     @Transactional
     public CreateRoomResponse createRoom(CreateRoomRequest request) {
@@ -98,6 +102,9 @@ public class BattleRoomService {
         //    ABANDONED → 재입장 (PLAYING 상태 방)
         if (participant.getStatus() == BattleParticipantStatus.READY
                 || participant.getStatus() == BattleParticipantStatus.ABANDONED) {
+            if (participant.getStatus() == BattleParticipantStatus.ABANDONED) {
+                reconnectStore.cancelGracePeriod(memberId);
+            }
             participant.join();
             battleParticipantRepository.save(participant);
         } else {
@@ -163,12 +170,40 @@ public class BattleRoomService {
                 .findByBattleRoomAndMember(room, member)
                 .orElseThrow(() -> new ServiceException("403-1", "해당 방의 참여자가 아닙니다."));
 
-        if (participant.getStatus() != BattleParticipantStatus.PLAYING) {
-            throw new ServiceException("400-1", "게임 중인 상태가 아닙니다. 현재 상태: " + participant.getStatus());
+        // ABANDONED: WebSocket이 끊긴 상태에서 의도적 퇴장 — grace period 취소 후 QUIT 처리
+        // PLAYING: 정상 접속 상태에서 의도적 퇴장
+        if (participant.getStatus() == BattleParticipantStatus.ABANDONED) {
+            reconnectStore.cancelGracePeriod(memberId);
+        } else if (participant.getStatus() != BattleParticipantStatus.PLAYING) {
+            throw new ServiceException("400-1", "퇴장할 수 없는 상태입니다. 현재 상태: " + participant.getStatus());
         }
 
         participant.quit();
         battleParticipantRepository.save(participant);
+
+        // 남은 활성 참여자 (PLAYING or ABANDONED) 여부 확인
+        List<BattleParticipant> all = battleParticipantRepository.findByBattleRoom(room);
+        boolean noActiveLeft = all.stream()
+                .noneMatch(p -> p.getStatus() == BattleParticipantStatus.PLAYING
+                        || p.getStatus() == BattleParticipantStatus.ABANDONED);
+
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    publisher.publish("/topic/room/" + roomId, Map.of("type", "PARTICIPANT_LEFT", "userId", memberId));
+                } catch (Exception e) {
+                    log.error("PARTICIPANT_LEFT WebSocket 전송 실패 roomId={}", roomId, e);
+                }
+                if (noActiveLeft) {
+                    try {
+                        battleResultService.settle(roomId);
+                    } catch (Exception e) {
+                        log.error("즉시 정산 실패 roomId={}", roomId, e);
+                    }
+                }
+            }
+        });
     }
 
     @Transactional(readOnly = true)

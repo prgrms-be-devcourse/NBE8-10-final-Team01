@@ -1,7 +1,6 @@
 package com.back.global.websocket;
 
 import java.security.Principal;
-import java.util.Map;
 
 import org.springframework.context.event.EventListener;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -13,7 +12,6 @@ import com.back.domain.battle.battleparticipant.entity.BattleParticipantStatus;
 import com.back.domain.battle.battleparticipant.repository.BattleParticipantRepository;
 import com.back.domain.battle.battleroom.entity.BattleRoomStatus;
 import com.back.global.security.SecurityUser;
-import com.back.global.websocket.pubsub.WebSocketMessagePublisher;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -24,7 +22,7 @@ import lombok.extern.slf4j.Slf4j;
 public class BattleDisconnectHandler {
 
     private final BattleParticipantRepository battleParticipantRepository;
-    private final WebSocketMessagePublisher publisher;
+    private final BattleReconnectStore reconnectStore;
 
     /**
      * WebSocket 연결이 끊길 때 Spring이 자동으로 발생시키는 이벤트 처리.
@@ -60,9 +58,12 @@ public class BattleDisconnectHandler {
                     participant.abandon();
                     battleParticipantRepository.save(participant);
 
-                    log.info("배틀 이탈 처리 - memberId={}, roomId={}", memberId, roomId);
+                    log.info("배틀 이탈 처리 - memberId={}, roomId={}, grace period 시작", memberId, roomId);
 
-                    publisher.publish("/topic/room/" + roomId, Map.of("type", "PARTICIPANT_LEFT", "userId", memberId));
+                    // PARTICIPANT_LEFT를 즉시 보내지 않고 15초 유예 기간 부여.
+                    // 새로고침 등 의도치 않은 끊김 시 재연결 기회를 준다.
+                    // 유예 기간 만료 후 미복귀 시 GracePeriodConsumer가 브로드캐스트.
+                    reconnectStore.startGracePeriod(memberId);
                 });
     }
 }
