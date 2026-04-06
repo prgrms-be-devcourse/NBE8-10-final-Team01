@@ -21,6 +21,7 @@ import com.back.domain.battle.battleparticipant.repository.BattleParticipantRepo
 import com.back.domain.battle.battleroom.entity.BattleRoom;
 import com.back.domain.battle.battleroom.entity.BattleRoomStatus;
 import com.back.domain.battle.battleroom.repository.BattleRoomRepository;
+import com.back.domain.battle.result.dto.ActiveRoomResponse;
 import com.back.domain.battle.result.dto.BattleResultResponse;
 import com.back.domain.battle.result.dto.BattleResultResponse.ParticipantResult;
 import com.back.domain.battle.result.dto.MyBattleResultsResponse;
@@ -194,6 +195,14 @@ public class BattleResultService {
                 room, participant.getMember(), SubmissionResult.WA, participant.getFinishTime());
 
         return elapsedSeconds + (waPenaltyCount * WA_PENALTY_SECONDS);
+    }
+
+    @Transactional(readOnly = true)
+    public ActiveRoomResponse getActiveRoom(Long memberId) {
+        return battleParticipantRepository
+                .findActiveParticipantByMemberId(memberId)
+                .map(p -> new ActiveRoomResponse(p.getBattleRoom().getId()))
+                .orElse(null);
     }
 
     /**

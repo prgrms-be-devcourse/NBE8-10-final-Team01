@@ -92,4 +92,19 @@ public interface BattleParticipantRepository extends JpaRepository<BattlePartici
             @Param("memberId") Long memberId,
             @Param("status") BattleParticipantStatus status,
             @Param("roomStatus") BattleRoomStatus roomStatus);
+
+    /**
+     * 관전 시도 시 해당 유저가 현재 배틀에 참여 중인지 확인하는 용도
+     * PLAYING(정상 참여 중) 또는 ABANDONED(네트워크 이탈) 상태이고 방이 PLAYING 중이면 참여 중으로 간주
+     */
+    @Query("""
+            select p from BattleParticipant p
+            join fetch p.battleRoom r
+            where p.member.id = :memberId
+              and p.status in (
+                  com.back.domain.battle.battleparticipant.entity.BattleParticipantStatus.PLAYING,
+                  com.back.domain.battle.battleparticipant.entity.BattleParticipantStatus.ABANDONED)
+              and r.status = com.back.domain.battle.battleroom.entity.BattleRoomStatus.PLAYING
+            """)
+    Optional<BattleParticipant> findActiveParticipantByMemberId(@Param("memberId") Long memberId);
 }
