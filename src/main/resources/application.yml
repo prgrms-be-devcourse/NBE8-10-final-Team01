@@ -45,3 +45,7 @@ logging:
     org.springframework.transaction.interceptor: DEBUG
     com.back: DEBUG
     org.springframework.security: DEBUG
+
+matching:
+  store:
+    type: memory
