@@ -32,6 +32,7 @@ import com.back.domain.problem.submission.entity.SubmissionResult;
 import com.back.domain.problem.submission.repository.SubmissionRepository;
 import com.back.domain.rating.profile.service.RatingProfileService;
 import com.back.global.exception.ServiceException;
+import com.back.global.websocket.BattleCodeStore;
 import com.back.global.websocket.pubsub.WebSocketMessagePublisher;
 
 import lombok.RequiredArgsConstructor;
@@ -54,6 +55,7 @@ public class BattleResultService {
     private final SubmissionRepository submissionRepository;
     private final RatingProfileService ratingProfileService;
     private final WebSocketMessagePublisher publisher;
+    private final BattleCodeStore battleCodeStore;
 
     @Transactional
     public void settle(Long roomId) {
@@ -135,6 +137,11 @@ public class BattleResultService {
                     publisher.publish("/topic/room/" + roomId, Map.of("type", "BATTLE_FINISHED"));
                 } catch (Exception e) {
                     log.error("BATTLE_FINISHED WebSocket 전송 실패 roomId={}", roomId, e);
+                }
+                try {
+                    battleCodeStore.deleteAllByRoom(roomId);
+                } catch (Exception e) {
+                    log.error("배틀 코드 Redis 정리 실패 roomId={}", roomId, e);
                 }
             }
         });
