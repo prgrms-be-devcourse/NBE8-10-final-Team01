@@ -17,7 +17,8 @@ class WebSocketConfigTest {
     @DisplayName("개인 matching 채널 라우팅을 위해 simple broker에 /queue prefix를 포함한다")
     @SuppressWarnings("unchecked")
     void configureMessageBroker_includesQueuePrefixForUserDestination() {
-        WebSocketConfig webSocketConfig = new WebSocketConfig(mock(WsTokenStore.class));
+        WebSocketConfig webSocketConfig =
+                new WebSocketConfig(mock(WsTokenStore.class), mock(BattleRoomSubscribeInterceptor.class));
         MessageBrokerRegistry registry =
                 new MessageBrokerRegistry(new ExecutorSubscribableChannel(), new ExecutorSubscribableChannel());
 
