@@ -22,6 +22,7 @@ import org.springframework.test.web.servlet.MvcResult;
 
 import com.back.domain.member.member.entity.Member;
 import com.back.domain.member.member.repository.MemberRepository;
+import com.back.domain.rating.profile.repository.MemberRatingProfileRepository;
 import com.back.global.IntegrationTestBase;
 
 @AutoConfigureMockMvc
@@ -32,6 +33,9 @@ class MemberControllerTest extends IntegrationTestBase {
 
     @Autowired
     private MemberRepository memberRepository;
+
+    @Autowired
+    private MemberRatingProfileRepository memberRatingProfileRepository;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -51,7 +55,13 @@ class MemberControllerTest extends IntegrationTestBase {
     void tearDown() {
         memberRepository.findByEmail(LOGIN_TEST_EMAIL).ifPresent(memberRepository::delete);
         // join_success 테스트가 생성한 회원 정리 — 미삭제 시 재실행 때 중복 이메일로 실패
-        memberRepository.findByEmail("test@example.com").ifPresent(memberRepository::delete);
+        memberRepository.findByEmail("test@example.com").ifPresent(member -> {
+            // profile FK가 있으므로 profile을 먼저 지우고 member를 삭제한다.
+            memberRatingProfileRepository
+                    .findByMemberId(member.getId())
+                    .ifPresent(memberRatingProfileRepository::delete);
+            memberRepository.delete(member);
+        });
     }
 
     // ============ 회원가입 ============
@@ -108,7 +118,7 @@ class MemberControllerTest extends IntegrationTestBase {
                 .andExpect(jsonPath("$.data.nickname").value("로그인테스터"))
                 .andExpect(jsonPath("$.data.email").value(LOGIN_TEST_EMAIL))
                 .andExpect(jsonPath("$.data.score").value(0))
-                .andExpect(jsonPath("$.data.tier").isEmpty())
+                .andExpect(jsonPath("$.data.tier").value("UNRANKED"))
                 .andExpect(jsonPath("$.data.role").value("USER"));
     }
     // ============ 로그인 ============

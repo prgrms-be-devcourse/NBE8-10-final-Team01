@@ -26,10 +26,10 @@ import com.back.domain.battle.result.dto.BattleResultResponse;
 import com.back.domain.battle.result.dto.BattleResultResponse.ParticipantResult;
 import com.back.domain.battle.result.dto.MyBattleResultsResponse;
 import com.back.domain.battle.result.dto.RoomListResponse;
-import com.back.domain.member.member.repository.MemberRepository;
 import com.back.domain.problem.submission.entity.Submission;
 import com.back.domain.problem.submission.entity.SubmissionResult;
 import com.back.domain.problem.submission.repository.SubmissionRepository;
+import com.back.domain.rating.profile.service.RatingProfileService;
 import com.back.global.exception.ServiceException;
 import com.back.global.websocket.pubsub.WebSocketMessagePublisher;
 
@@ -51,7 +51,7 @@ public class BattleResultService {
     private final BattleRoomRepository battleRoomRepository;
     private final BattleParticipantRepository battleParticipantRepository;
     private final SubmissionRepository submissionRepository;
-    private final MemberRepository memberRepository;
+    private final RatingProfileService ratingProfileService;
     private final WebSocketMessagePublisher publisher;
 
     @Transactional
@@ -92,6 +92,13 @@ public class BattleResultService {
 
             // 5. Member.score 갱신
             participant.getMember().applyScore(scoreDelta);
+            // 배틀 결과를 rating profile에 반영(레이팅/판수/tierScore/tier 재계산).
+            ratingProfileService.applyBattleResult(participant.getMember(), scoreDelta);
+            if (isAC) {
+                // 배틀에서 처음으로 푼 문제라면 난이도 기반 first-AC 보너스를 1회 반영한다.
+                ratingProfileService.applyBattleFirstSolve(
+                        participant.getMember(), room.getProblem(), participant.getFinishTime());
+            }
 
             rank++;
         }
