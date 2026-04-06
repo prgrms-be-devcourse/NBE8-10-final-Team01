@@ -16,6 +16,7 @@ import com.back.domain.matching.queue.model.MatchSession;
 import com.back.domain.matching.queue.model.MatchSessionStatus;
 import com.back.domain.matching.queue.model.QueueKey;
 import com.back.domain.matching.queue.model.ReadyDecision;
+import com.back.domain.matching.queue.model.WaitingUser;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 
 class MatchingRedisSerializerTest {
@@ -52,6 +53,21 @@ class MatchingRedisSerializerTest {
         MatchSession restored = serializer.readMatchSession(payload);
 
         assertThat(restored).isEqualTo(session);
+    }
+
+    @Test
+    @DisplayName("WaitingUser 는 JSON 으로 직렬화 후 joinedAt까지 유지한 채 복원할 수 있다")
+    void serializesWaitingUserRoundTrip() {
+        WaitingUser waitingUser = new WaitingUser(
+                1L, "m1", new QueueKey("array", Difficulty.EASY), LocalDateTime.of(2026, 4, 6, 12, 10, 0));
+
+        String payload = serializer.writeWaitingUser(waitingUser);
+        WaitingUser restored = serializer.readWaitingUser(payload);
+
+        assertThat(restored.getUserId()).isEqualTo(waitingUser.getUserId());
+        assertThat(restored.getNickname()).isEqualTo(waitingUser.getNickname());
+        assertThat(restored.getQueueKey()).isEqualTo(waitingUser.getQueueKey());
+        assertThat(restored.getJoinedAt()).isEqualTo(waitingUser.getJoinedAt());
     }
 
     @Test
