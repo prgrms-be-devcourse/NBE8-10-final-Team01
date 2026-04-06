@@ -109,4 +109,15 @@ public interface BattleParticipantRepository extends JpaRepository<BattlePartici
               and r.status = com.back.domain.battle.battleroom.entity.BattleRoomStatus.PLAYING
             """)
     Optional<BattleParticipant> findActiveParticipantByMemberId(@Param("memberId") Long memberId);
+
+    @Query("""
+            select bp.finalRank
+            from BattleParticipant bp
+            join bp.battleRoom br
+            where bp.member.id = :memberId
+              and bp.finalRank is not null
+            order by br.createdAt desc
+            """)
+    // 최근 Top2 비율 산정용: 최신 순으로 finalRank만 가볍게 조회한다.
+    List<Integer> findRecentFinalRanksByMemberId(@Param("memberId") Long memberId, Pageable pageable);
 }

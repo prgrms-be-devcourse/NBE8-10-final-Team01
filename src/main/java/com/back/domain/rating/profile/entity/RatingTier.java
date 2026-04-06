@@ -1,0 +1,35 @@
+package com.back.domain.rating.profile.entity;
+
+// 랭킹 시스템에서 노출하는 경쟁 티어 구간
+public enum RatingTier {
+    BRONZE_5,
+    BRONZE_4,
+    BRONZE_3,
+    BRONZE_2,
+    BRONZE_1,
+    SILVER_5,
+    SILVER_4,
+    SILVER_3,
+    SILVER_2,
+    SILVER_1,
+    GOLD_5,
+    GOLD_4,
+    GOLD_3,
+    GOLD_2,
+    GOLD_1,
+    PLATINUM_5,
+    PLATINUM_4,
+    PLATINUM_3,
+    PLATINUM_2,
+    PLATINUM_1,
+    DIAMOND_5,
+    DIAMOND_4,
+    DIAMOND_3,
+    DIAMOND_2,
+    DIAMOND_1,
+    MASTER_4,
+    MASTER_3,
+    MASTER_2,
+    MASTER_1,
+    GOD
+}

@@ -77,12 +77,15 @@ public class ProblemPickQueryRepository {
 
     private String buildFromWhereJpql(List<Long> excludeProblemIds) {
         // 문제-태그 연결 테이블을 통해 category 필터를 적용한다.
+        // 또한 Codeforces rating이 없는 문제는 랭크 큐에서 제외하기 위해 difficultyRating 유효값을 강제한다.
         // 그리고 실전 채점 가능한 문제만 대상으로 하기 위해 hidden 테스트 존재를 강제한다.
         return """
                 from Problem p
                 join ProblemTagConnect ptc on ptc.problem = p
                 join Tag t on ptc.tag = t
                 where p.difficulty = :difficulty
+                  and p.difficultyRating is not null
+                  and p.difficultyRating >= 800
                 and lower(t.name) = :category
                   and exists (
                         select tc.id

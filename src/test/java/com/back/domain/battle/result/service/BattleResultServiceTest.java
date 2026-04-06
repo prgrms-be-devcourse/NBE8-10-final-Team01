@@ -24,9 +24,9 @@ import com.back.domain.battle.battleroom.entity.BattleRoomStatus;
 import com.back.domain.battle.battleroom.repository.BattleRoomRepository;
 import com.back.domain.battle.result.dto.ActiveRoomResponse;
 import com.back.domain.battle.result.dto.MyBattleResultsResponse;
-import com.back.domain.member.member.repository.MemberRepository;
 import com.back.domain.problem.problem.entity.Problem;
 import com.back.domain.problem.submission.repository.SubmissionRepository;
+import com.back.domain.rating.profile.service.RatingProfileService;
 import com.back.global.exception.ServiceException;
 import com.back.global.websocket.pubsub.WebSocketMessagePublisher;
 
@@ -35,11 +35,11 @@ class BattleResultServiceTest {
     private final BattleRoomRepository battleRoomRepository = mock(BattleRoomRepository.class);
     private final BattleParticipantRepository battleParticipantRepository = mock(BattleParticipantRepository.class);
     private final SubmissionRepository submissionRepository = mock(SubmissionRepository.class);
-    private final MemberRepository memberRepository = mock(MemberRepository.class);
+    private final RatingProfileService ratingProfileService = mock(RatingProfileService.class);
     private final WebSocketMessagePublisher publisher = mock(WebSocketMessagePublisher.class);
 
     private final BattleResultService battleResultService = new BattleResultService(
-            battleRoomRepository, battleParticipantRepository, submissionRepository, memberRepository, publisher);
+            battleRoomRepository, battleParticipantRepository, submissionRepository, ratingProfileService, publisher);
 
     @Test
     @DisplayName("내 전적 조회 성공 시 battleResults와 pageInfo를 반환한다")

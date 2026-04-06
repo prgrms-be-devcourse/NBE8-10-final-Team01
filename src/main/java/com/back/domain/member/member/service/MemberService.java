@@ -12,6 +12,9 @@ import com.back.domain.member.member.dto.LoginTokens;
 import com.back.domain.member.member.dto.MyInfoResponse;
 import com.back.domain.member.member.entity.Member;
 import com.back.domain.member.member.repository.MemberRepository;
+import com.back.domain.rating.policy.TierPolicy;
+import com.back.domain.rating.profile.repository.MemberRatingProfileRepository;
+import com.back.domain.rating.profile.service.RatingProfileService;
 import com.back.global.exception.ServiceException;
 import com.back.global.jwt.JwtProvider;
 import com.back.global.jwt.RefreshTokenService;
@@ -25,6 +28,8 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class MemberService {
     private final MemberRepository memberRepository;
+    private final MemberRatingProfileRepository memberRatingProfileRepository;
+    private final RatingProfileService ratingProfileService;
     private final PasswordEncoder passwordEncoder;
     private final JwtProvider jwtProvider;
     private final RefreshTokenService refreshTokenService;
@@ -56,6 +61,8 @@ public class MemberService {
         Member member = Member.createUser(req.name(), normalizedEmail, encodedPassword);
 
         memberRepository.save(member);
+        // 가입 직후 rating profile row를 생성해 후속 집계 로직이 null 분기 없이 동작하게 한다.
+        ratingProfileService.ensureProfile(member);
 
         return RsData.of("200", "회원가입성공");
     }
@@ -69,7 +76,15 @@ public class MemberService {
                 .findById(memberId)
                 .orElseThrow(() -> new ServiceException("MEMBER_404", "존재하지 않는 회원입니다"));
 
-        return RsData.of("200", "내 정보 조회 성공", MyInfoResponse.from(member));
+        String rankingTier = memberRatingProfileRepository
+                .findByMemberId(memberId)
+                .map(ratingProfile -> TierPolicy.resolveDisplayTier(
+                        ratingProfile.getTier(),
+                        ratingProfile.getBattleMatchCount(),
+                        ratingProfile.getFirstSolvedProblemCount()))
+                .orElseGet(() -> TierPolicy.resolveDisplayTier(null, null, null));
+
+        return RsData.of("200", "내 정보 조회 성공", MyInfoResponse.from(member, rankingTier));
     }
 
     // 로그인 — 인증 성공 시 accessToken + refreshToken 반환 (쿠키 설정은 컨트롤러가 담당)
