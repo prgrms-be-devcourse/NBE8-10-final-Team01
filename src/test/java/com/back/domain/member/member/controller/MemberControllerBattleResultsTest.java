@@ -18,6 +18,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import com.back.domain.battle.result.dto.MyBattleResultsResponse;
 import com.back.domain.battle.result.service.BattleResultService;
 import com.back.domain.member.member.entity.Member;
+import com.back.domain.member.member.service.MemberRatingProgressService;
 import com.back.domain.member.member.service.MemberService;
 import com.back.global.globalExceptionHandler.GlobalExceptionHandler;
 import com.back.global.jwt.RefreshTokenService;
@@ -26,6 +27,7 @@ import com.back.global.rq.Rq;
 class MemberControllerBattleResultsTest {
 
     private final MemberService memberService = mock(MemberService.class);
+    private final MemberRatingProgressService memberRatingProgressService = mock(MemberRatingProgressService.class);
     private final BattleResultService battleResultService = mock(BattleResultService.class);
     private final RefreshTokenService refreshTokenService = mock(RefreshTokenService.class);
     private final Rq rq = mock(Rq.class);
@@ -34,7 +36,8 @@ class MemberControllerBattleResultsTest {
 
     @BeforeEach
     void setUp() {
-        MemberController controller = new MemberController(memberService, battleResultService, refreshTokenService, rq);
+        MemberController controller = new MemberController(
+                memberService, memberRatingProgressService, battleResultService, refreshTokenService, rq);
 
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
