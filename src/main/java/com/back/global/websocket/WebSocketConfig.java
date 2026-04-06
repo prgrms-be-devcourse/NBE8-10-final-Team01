@@ -31,6 +31,7 @@ import lombok.extern.slf4j.Slf4j;
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     private final WsTokenStore wsTokenStore;
+    private final BattleRoomSubscribeInterceptor battleRoomSubscribeInterceptor;
 
     /**
      * STOMP 메시지 인바운드 채널 인터셉터 등록.
@@ -51,47 +52,50 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
      */
     @Override
     public void configureClientInboundChannel(ChannelRegistration registration) {
-        registration.interceptors(new ChannelInterceptor() {
-            @Override
-            public Message<?> preSend(Message<?> message, MessageChannel channel) {
-                StompHeaderAccessor accessor = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
-                if (accessor == null) return message;
+        registration.interceptors(
+                new ChannelInterceptor() {
+                    @Override
+                    public Message<?> preSend(Message<?> message, MessageChannel channel) {
+                        StompHeaderAccessor accessor =
+                                MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
+                        if (accessor == null) return message;
 
-                if (StompCommand.CONNECT.equals(accessor.getCommand())) {
-                    Principal principal = accessor.getUser();
+                        if (StompCommand.CONNECT.equals(accessor.getCommand())) {
+                            Principal principal = accessor.getUser();
 
-                    if (principal instanceof UsernamePasswordAuthenticationToken cookieAuth
-                            && cookieAuth.getPrincipal() instanceof SecurityUser cookieUser) {
-                        // ① 쿠키 기반: Spring이 이미 Principal을 전파해둔 상태
-                        accessor.setUser(createWsAuthentication(cookieUser));
-                        log.info("WebSocket 연결 (쿠키 인증) - memberId={}", cookieUser.getId());
+                            if (principal instanceof UsernamePasswordAuthenticationToken cookieAuth
+                                    && cookieAuth.getPrincipal() instanceof SecurityUser cookieUser) {
+                                // ① 쿠키 기반: Spring이 이미 Principal을 전파해둔 상태
+                                accessor.setUser(createWsAuthentication(cookieUser));
+                                log.info("WebSocket 연결 (쿠키 인증) - memberId={}", cookieUser.getId());
 
-                    } else {
-                        // ② 1회용 토큰 기반: STOMP 헤더에서 토큰 추출 후 Redis 검증
-                        String token = accessor.getFirstNativeHeader("X-WS-Token");
+                            } else {
+                                // ② 1회용 토큰 기반: STOMP 헤더에서 토큰 추출 후 Redis 검증
+                                String token = accessor.getFirstNativeHeader("X-WS-Token");
 
-                        if (token == null) {
-                            // 쿠키도 없고 토큰도 없음 → 연결 거부
-                            log.warn("WebSocket 연결 거부 - 인증 정보 없음 (쿠키/토큰 모두 없음)");
-                            return null;
+                                if (token == null) {
+                                    // 쿠키도 없고 토큰도 없음 → 연결 거부
+                                    log.warn("WebSocket 연결 거부 - 인증 정보 없음 (쿠키/토큰 모두 없음)");
+                                    return null;
+                                }
+
+                                SecurityUser tokenUser = wsTokenStore.resolve(token);
+                                if (tokenUser == null) {
+                                    // 만료되었거나 이미 사용된 토큰 → 연결 거부
+                                    log.warn("WebSocket 연결 거부 - 유효하지 않거나 만료된 토큰");
+                                    return null;
+                                }
+
+                                // 검증 성공: SecurityUser를 STOMP Principal로 등록
+                                accessor.setUser(createWsAuthentication(tokenUser));
+                                log.info("WebSocket 연결 (토큰 인증) - memberId={}", tokenUser.getId());
+                            }
                         }
 
-                        SecurityUser tokenUser = wsTokenStore.resolve(token);
-                        if (tokenUser == null) {
-                            // 만료되었거나 이미 사용된 토큰 → 연결 거부
-                            log.warn("WebSocket 연결 거부 - 유효하지 않거나 만료된 토큰");
-                            return null;
-                        }
-
-                        // 검증 성공: SecurityUser를 STOMP Principal로 등록
-                        accessor.setUser(createWsAuthentication(tokenUser));
-                        log.info("WebSocket 연결 (토큰 인증) - memberId={}", tokenUser.getId());
+                        return message;
                     }
-                }
-
-                return message;
-            }
-        });
+                },
+                battleRoomSubscribeInterceptor);
     }
 
     private UsernamePasswordAuthenticationToken createWsAuthentication(SecurityUser securityUser) {

@@ -222,6 +222,10 @@ public class BattleRoomService {
                 .findByIdWithProblem(roomId)
                 .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 방입니다."));
 
+        if (!battleParticipantRepository.existsByBattleRoomIdAndMemberId(roomId, memberId)) {
+            throw new ServiceException("403-1", "해당 방의 참여자가 아닙니다.");
+        }
+
         List<BattleParticipant> participants = battleParticipantRepository.findByBattleRoom(room);
         String myCode = battleCodeStore.get(roomId, memberId);
         return BattleRoomStateResponse.from(room, participants, myCode);
