@@ -27,6 +27,9 @@ public class RedissonConfig {
     @Bean(destroyMethod = "shutdown")
     public RedissonClient redissonClient() {
         RedisConnectionDetails.Standalone standalone = redisConnectionDetails.getStandalone();
+        if (standalone == null) {
+            throw new IllegalStateException("RedissonConfig은 Standalone 모드만 지원합니다. Sentinel/Cluster 구성은 지원하지 않습니다.");
+        }
         String host = standalone.getHost();
         int port = standalone.getPort();
 
