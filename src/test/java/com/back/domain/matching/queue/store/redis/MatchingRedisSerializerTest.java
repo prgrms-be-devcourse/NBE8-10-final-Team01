@@ -1,6 +1,7 @@
 package com.back.domain.matching.queue.store.redis;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
@@ -51,6 +52,22 @@ class MatchingRedisSerializerTest {
         MatchSession restored = serializer.readMatchSession(payload);
 
         assertThat(restored).isEqualTo(session);
+    }
+
+    @Test
+    @DisplayName("비어 있는 MatchSession JSON 은 명시적인 예외로 거부한다")
+    void rejectsBlankMatchSessionJson() {
+        assertThatThrownBy(() -> serializer.readMatchSession(" "))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("match session JSON 값이 비어 있습니다.");
+    }
+
+    @Test
+    @DisplayName("없는 QueueKey JSON 은 명시적인 예외로 거부한다")
+    void rejectsNullQueueKeyJson() {
+        assertThatThrownBy(() -> serializer.readQueueKey(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("queue key JSON 값이 비어 있습니다.");
     }
 
     private Map<Long, String> participantNicknames() {

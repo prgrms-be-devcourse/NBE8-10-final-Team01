@@ -62,6 +62,11 @@ public class MatchingRedisSerializer {
     }
 
     private <T> T readValue(String value, Class<T> targetType, String targetName) {
+        // Redis 값이 비어 있는 경우는 호출부가 missing 으로 처리해야 하므로 즉시 실패시킨다.
+        if (value == null || value.isBlank()) {
+            throw new IllegalStateException(targetName + " JSON 값이 비어 있습니다.");
+        }
+
         try {
             return objectMapper.readValue(value, targetType);
         } catch (JsonProcessingException e) {
