@@ -42,10 +42,17 @@ public class WaitingUser {
      * joinedAt은 객체가 생성되는 현재 시각으로 자동 저장한다.
      */
     public WaitingUser(Long userId, String nickname, QueueKey queueKey) {
+        this(userId, nickname, queueKey, LocalDateTime.now());
+    }
+
+    /**
+     * Redis 직렬화 복원처럼 joinedAt을 유지해야 하는 경우에만 사용한다.
+     */
+    public WaitingUser(Long userId, String nickname, QueueKey queueKey, LocalDateTime joinedAt) {
         this.userId = userId;
         this.nickname = nickname;
         this.queueKey = queueKey;
-        this.joinedAt = LocalDateTime.now();
+        this.joinedAt = joinedAt;
     }
 
     // 대기 중인 사용자의 ID 반환

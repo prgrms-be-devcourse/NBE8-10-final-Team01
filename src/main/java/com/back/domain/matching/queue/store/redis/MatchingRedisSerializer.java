@@ -4,10 +4,13 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
+import org.springframework.stereotype.Component;
+
 import com.back.domain.matching.queue.model.MatchSession;
 import com.back.domain.matching.queue.model.MatchSessionStatus;
 import com.back.domain.matching.queue.model.QueueKey;
 import com.back.domain.matching.queue.model.ReadyDecision;
+import com.back.domain.matching.queue.model.WaitingUser;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -16,6 +19,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  *
  * 이번 단계에서는 StringRedisTemplate + JSON 저장 방식을 기준으로 고정한다.
  */
+@Component
 public class MatchingRedisSerializer {
 
     private final ObjectMapper objectMapper;
@@ -39,6 +43,13 @@ public class MatchingRedisSerializer {
     }
 
     /**
+     * queue list와 userQueue index에는 같은 WaitingUser JSON 문자열을 저장한다.
+     */
+    public String writeWaitingUser(WaitingUser waitingUser) {
+        return writeValue(WaitingUserDocument.from(waitingUser), "waiting user");
+    }
+
+    /**
      * Redis 에서 꺼낸 JSON 을 MatchSession 으로 복원한다.
      */
     public MatchSession readMatchSession(String value) {
@@ -51,6 +62,14 @@ public class MatchingRedisSerializer {
      */
     public QueueKey readQueueKey(String value) {
         return readValue(value, QueueKey.class, "queue key");
+    }
+
+    /**
+     * queue list와 userQueue index는 같은 복원 규칙을 사용한다.
+     */
+    public WaitingUser readWaitingUser(String value) {
+        WaitingUserDocument document = readValue(value, WaitingUserDocument.class, "waiting user");
+        return document.toModel();
     }
 
     private String writeValue(Object value, String targetName) {
@@ -113,6 +132,24 @@ public class MatchingRedisSerializer {
                     roomId,
                     deadline,
                     createdAt);
+        }
+    }
+
+    /**
+     * WaitingUser도 joinedAt을 유지해야 rollback과 디버깅 시점이 흐려지지 않는다.
+     */
+    private record WaitingUserDocument(Long userId, String nickname, QueueKey queueKey, LocalDateTime joinedAt) {
+
+        private static WaitingUserDocument from(WaitingUser waitingUser) {
+            return new WaitingUserDocument(
+                    waitingUser.getUserId(),
+                    waitingUser.getNickname(),
+                    waitingUser.getQueueKey(),
+                    waitingUser.getJoinedAt());
+        }
+
+        private WaitingUser toModel() {
+            return new WaitingUser(userId, nickname, queueKey, joinedAt);
         }
     }
 }
