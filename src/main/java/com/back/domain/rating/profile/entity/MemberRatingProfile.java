@@ -39,19 +39,23 @@ public class MemberRatingProfile extends BaseEntity {
     @JoinColumn(name = "member_id", nullable = false, unique = true)
     private Member member;
 
-    // 경쟁 실력 지표(배틀 중심)
+    // 경쟁 실력 지표(SR)
     @Column(name = "battle_rating")
     private Integer battleRating;
 
-    // 문제별 first-AC 난이도 누적 지표(솔로/배틀 공통)
+    // 하드 배틀(난이도 2000+) 전용 실력 지표(Hard SR)
+    @Column(name = "hard_battle_rating")
+    private Integer hardBattleRating;
+
+    // 활동 점수(AP): 문제별 first-AC 난이도 누적 지표(솔로/배틀 공통)
     @Column(name = "first_solve_score")
     private Integer firstSolveScore;
 
-    // 티어 산정에 사용하는 최종 통합 점수
+    // 리더보드 표시에 사용하는 통합 점수(현재는 SR 중심)
     @Column(name = "tier_score")
     private Integer tierScore;
 
-    // 티어 게이트 검증용 누적 배틀 판수
+    // 배치 구간(K=64) 여부 판단용 누적 배틀 판수
     @Column(name = "battle_match_count")
     private Integer battleMatchCount;
 
@@ -66,18 +70,24 @@ public class MemberRatingProfile extends BaseEntity {
     public static MemberRatingProfile createDefault(Member member) {
         MemberRatingProfile ranking = new MemberRatingProfile();
         ranking.member = member;
-        ranking.battleRating = 0;
+        ranking.battleRating = 1000;
+        ranking.hardBattleRating = 1000;
         ranking.firstSolveScore = 0;
-        ranking.tierScore = 0;
+        ranking.tierScore = 1000;
         ranking.battleMatchCount = 0;
         ranking.firstSolvedProblemCount = 0;
-        ranking.tier = RatingTier.BRONZE;
+        ranking.tier = RatingTier.BRONZE_5;
         return ranking;
     }
 
-    // null 안전 누적으로 배틀 레이팅 증감을 반영한다.
+    // null 안전 누적으로 SR 증감을 반영한다.
     public void applyBattleRatingDelta(int delta) {
-        this.battleRating = (this.battleRating == null ? 0 : this.battleRating) + delta;
+        this.battleRating = (this.battleRating == null ? 1000 : this.battleRating) + delta;
+    }
+
+    // null 안전 누적으로 Hard SR 증감을 반영한다.
+    public void applyHardBattleRatingDelta(int delta) {
+        this.hardBattleRating = (this.hardBattleRating == null ? 1000 : this.hardBattleRating) + delta;
     }
 
     // null 안전 누적으로 문제별 first-AC 난이도 점수를 반영한다.
