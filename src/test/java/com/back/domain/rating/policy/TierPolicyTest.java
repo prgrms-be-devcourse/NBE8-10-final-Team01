@@ -21,6 +21,12 @@ class TierPolicyTest {
     }
 
     @Test
+    @DisplayName("tierScore가 null이면 BRONZE를 반환한다")
+    void resolveTier_whenNull_returnsBronze() {
+        assertThat(TierPolicy.resolveTier(null)).isEqualTo(RatingTier.BRONZE);
+    }
+
+    @Test
     @DisplayName("활동 전적이 없으면 UNRANKED를 반환한다")
     void resolveDisplayTier_unrankedWhenNoHistory() {
         assertThat(TierPolicy.resolveDisplayTier(RatingTier.BRONZE, 0, 0)).isEqualTo("UNRANKED");

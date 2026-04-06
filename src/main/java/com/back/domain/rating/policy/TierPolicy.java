@@ -8,12 +8,14 @@ public final class TierPolicy {
     private TierPolicy() {}
 
     // 현재 운영 기준 컷라인. 밸런싱 시 이 메서드만 조정하면 된다.
-    public static RatingTier resolveTier(int tierScore) {
-        if (tierScore >= 2000) return RatingTier.MASTER;
-        if (tierScore >= 1800) return RatingTier.DIAMOND;
-        if (tierScore >= 1600) return RatingTier.PLATINUM;
-        if (tierScore >= 1400) return RatingTier.GOLD;
-        if (tierScore >= 1200) return RatingTier.SILVER;
+    public static RatingTier resolveTier(Integer tierScore) {
+        int safeTierScore = tierScore == null ? 0 : tierScore;
+
+        if (safeTierScore >= 2000) return RatingTier.MASTER;
+        if (safeTierScore >= 1800) return RatingTier.DIAMOND;
+        if (safeTierScore >= 1600) return RatingTier.PLATINUM;
+        if (safeTierScore >= 1400) return RatingTier.GOLD;
+        if (safeTierScore >= 1200) return RatingTier.SILVER;
         return RatingTier.BRONZE;
     }
 
