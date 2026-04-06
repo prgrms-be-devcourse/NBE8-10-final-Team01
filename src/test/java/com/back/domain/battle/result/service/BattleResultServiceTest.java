@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -21,6 +22,7 @@ import com.back.domain.battle.battleparticipant.repository.BattleParticipantRepo
 import com.back.domain.battle.battleroom.entity.BattleRoom;
 import com.back.domain.battle.battleroom.entity.BattleRoomStatus;
 import com.back.domain.battle.battleroom.repository.BattleRoomRepository;
+import com.back.domain.battle.result.dto.ActiveRoomResponse;
 import com.back.domain.battle.result.dto.MyBattleResultsResponse;
 import com.back.domain.member.member.repository.MemberRepository;
 import com.back.domain.problem.problem.entity.Problem;
@@ -116,5 +118,43 @@ class BattleResultServiceTest {
         assertThatThrownBy(() -> battleResultService.getMyBattleResults(1L, 0, 0))
                 .isInstanceOf(ServiceException.class)
                 .hasMessageContaining("size는 1 이상");
+    }
+
+    @Test
+    @DisplayName("참여 중인 방(PLAYING 또는 ABANDONED)이 있으면 roomId를 반환한다")
+    void getActiveRoom_whenExists() {
+        // given
+        Long memberId = 1L;
+
+        BattleParticipant participant = mock(BattleParticipant.class);
+        BattleRoom room = mock(BattleRoom.class);
+
+        when(participant.getBattleRoom()).thenReturn(room);
+        when(room.getId()).thenReturn(42L);
+        when(battleParticipantRepository.findActiveParticipantByMemberId(memberId))
+                .thenReturn(Optional.of(participant));
+
+        // when
+        ActiveRoomResponse response = battleResultService.getActiveRoom(memberId);
+
+        // then
+        assertThat(response).isNotNull();
+        assertThat(response.roomId()).isEqualTo(42L);
+    }
+
+    @Test
+    @DisplayName("참여 중인 방이 없으면 null을 반환한다")
+    void getActiveRoom_whenNotExists() {
+        // given
+        Long memberId = 1L;
+
+        when(battleParticipantRepository.findActiveParticipantByMemberId(memberId))
+                .thenReturn(Optional.empty());
+
+        // when
+        ActiveRoomResponse response = battleResultService.getActiveRoom(memberId);
+
+        // then
+        assertThat(response).isNull();
     }
 }
