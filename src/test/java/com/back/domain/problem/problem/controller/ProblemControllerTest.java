@@ -50,19 +50,55 @@ class ProblemControllerTest {
                 "A+B를 출력한다.",
                 1000L,
                 256L,
+                "ko",
                 List.of("python3", "java"),
                 "python3",
                 List.of(
                         new ProblemDetailResponse.StarterCode("python3", "print('hello')"),
                         new ProblemDetailResponse.StarterCode("java", "class Main {}")),
-                List.of(new ProblemDetailResponse.SampleCase("1 2", "3")));
-        when(problemService.getProblem(1L)).thenReturn(response);
+                List.of(new ProblemDetailResponse.SampleCase("1 2", "3"))
+        );
+
+        when(problemService.getProblem(1L, "ko")).thenReturn(response);
 
         // when
-        ProblemDetailResponse actual = problemController.getProblem(1L);
+        ProblemDetailResponse actual = problemController.getProblem(1L, "ko");
 
         // then
         assertThat(actual).isEqualTo(response);
-        verify(problemService).getProblem(1L);
+        verify(problemService).getProblem(1L, "ko");
+    }
+
+    @Test
+    @DisplayName("문제 단건 조회 시 lang이 없으면 null을 서비스에 전달한다")
+    void getProblem_withoutLang_passesNullToService() {
+        // given
+        ProblemDetailResponse response = new ProblemDetailResponse(
+                1L,
+                "A + B",
+                "EASY",
+                "You are given two integers A and B.",
+                "The first line contains A and B.",
+                "Print A+B.",
+                1000L,
+                256L,
+                "en",
+                List.of("python3", "java"),
+                "python3",
+                List.of(
+                        new ProblemDetailResponse.StarterCode("python3", "print('hello')"),
+                        new ProblemDetailResponse.StarterCode("java", "class Main {}")
+                ),
+                List.of(new ProblemDetailResponse.SampleCase("1 2", "3"))
+        );
+
+        when(problemService.getProblem(1L, null)).thenReturn(response);
+
+        // when
+        ProblemDetailResponse actual = problemController.getProblem(1L, null);
+
+        // then
+        assertThat(actual).isEqualTo(response);
+        verify(problemService).getProblem(1L, null);
     }
 }

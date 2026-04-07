@@ -25,14 +25,24 @@ import com.back.domain.problem.problem.enums.DifficultyLevel;
 import com.back.domain.problem.problem.repository.ProblemRepository;
 import com.back.domain.problem.testcase.entity.TestCase;
 import com.back.global.exception.ServiceException;
+import com.back.domain.problem.translation.entity.ProblemTranslation;
+import com.back.domain.problem.translation.repository.ProblemTranslationRepository;
+
 
 class ProblemServiceTest {
 
     private final ProblemRepository problemRepository = mock(ProblemRepository.class);
     private final ProblemLanguageProfileRepository problemLanguageProfileRepository =
             mock(ProblemLanguageProfileRepository.class);
+    private final ProblemTranslationRepository problemTranslationRepository =
+            mock(ProblemTranslationRepository.class);
+
     private final ProblemService problemService =
-            new ProblemService(problemRepository, problemLanguageProfileRepository);
+            new ProblemService(
+                    problemRepository,
+                    problemLanguageProfileRepository,
+                    problemTranslationRepository
+            );
 
     @Test
     @DisplayName("문제 목록 조회 시 페이지 정보와 요약 목록을 반환한다")
@@ -87,8 +97,8 @@ class ProblemServiceTest {
     }
 
     @Test
-    @DisplayName("문제 ID로 단건 조회 시 프론트 전달용 상세 정보를 반환한다")
-    void getProblem_returnsProblemDetail() {
+    @DisplayName("문제 ID로 단건 조회 시 lang이 없으면 원문 상세 정보를 반환한다")
+    void getProblem_withoutLang_returnsOriginalProblemDetail() {
         // given
         Problem problem = mock(Problem.class);
         TestCase sampleCase = mock(TestCase.class);
@@ -115,6 +125,7 @@ class ProblemServiceTest {
         when(pythonProfile.getLanguageCode()).thenReturn("python3");
         when(pythonProfile.getStarterCode()).thenReturn("print('hello')");
         when(pythonProfile.getIsDefault()).thenReturn(true);
+
         when(javaProfile.getLanguageCode()).thenReturn("java");
         when(javaProfile.getStarterCode()).thenReturn("class Main {}");
         when(javaProfile.getIsDefault()).thenReturn(false);
@@ -124,7 +135,7 @@ class ProblemServiceTest {
                 .thenReturn(List.of(pythonProfile, javaProfile));
 
         // when
-        ProblemDetailResponse response = problemService.getProblem(1L);
+        ProblemDetailResponse response = problemService.getProblem(1L, null);
 
         // then
         assertThat(response.problemId()).isEqualTo(1L);
@@ -135,13 +146,106 @@ class ProblemServiceTest {
         assertThat(response.outputFormat()).isEqualTo("A+B를 출력한다.");
         assertThat(response.timeLimitMs()).isEqualTo(1000L);
         assertThat(response.memoryLimitMb()).isEqualTo(256L);
+        assertThat(response.language()).isEqualTo("en");
         assertThat(response.supportedLanguages()).containsExactly("python3", "java");
         assertThat(response.defaultLanguage()).isEqualTo("python3");
         assertThat(response.starterCodes())
                 .containsExactly(
                         new ProblemDetailResponse.StarterCode("python3", "print('hello')"),
                         new ProblemDetailResponse.StarterCode("java", "class Main {}"));
-        assertThat(response.sampleCases()).containsExactly(new ProblemDetailResponse.SampleCase("1 2", "3"));
+        assertThat(response.sampleCases())
+                .containsExactly(new ProblemDetailResponse.SampleCase("1 2", "3"));
+    }
+
+    @Test
+    @DisplayName("문제 ID로 단건 조회 시 lang이 ko이고 번역이 있으면 번역본을 반환한다")
+    void getProblem_withKoAndTranslation_returnsTranslatedDetail() {
+        // given
+        Problem problem = mock(Problem.class);
+        ProblemTranslation translation = mock(ProblemTranslation.class);
+        TestCase sampleCase = mock(TestCase.class);
+        ProblemLanguageProfile pythonProfile = mock(ProblemLanguageProfile.class);
+
+        when(problem.getId()).thenReturn(1L);
+        when(problem.getTitle()).thenReturn("A + B");
+        when(problem.getDifficulty()).thenReturn(DifficultyLevel.EASY);
+        when(problem.getContent()).thenReturn("Solve A + B.");
+        when(problem.getInputFormat()).thenReturn("Input A and B.");
+        when(problem.getOutputFormat()).thenReturn("Print A + B.");
+        when(problem.getTimeLimitMs()).thenReturn(1000L);
+        when(problem.getMemoryLimitMb()).thenReturn(256L);
+        when(problem.getTestCases()).thenReturn(List.of(sampleCase));
+
+        when(sampleCase.getIsSample()).thenReturn(true);
+        when(sampleCase.getInput()).thenReturn("1 2");
+        when(sampleCase.getExpectedOutput()).thenReturn("3");
+
+        when(pythonProfile.getLanguageCode()).thenReturn("python3");
+        when(pythonProfile.getStarterCode()).thenReturn("print('hello')");
+        when(pythonProfile.getIsDefault()).thenReturn(true);
+
+        when(translation.getTitle()).thenReturn("A + B");
+        when(translation.getContent()).thenReturn("두 정수 A와 B의 합을 구하세요.");
+        when(translation.getInputFormat()).thenReturn("한 줄에 A와 B가 주어집니다.");
+        when(translation.getOutputFormat()).thenReturn("A+B 값을 출력합니다.");
+
+        when(problemRepository.findById(1L)).thenReturn(Optional.of(problem));
+        when(problemLanguageProfileRepository.findByProblemIdOrderByIdAsc(1L))
+                .thenReturn(List.of(pythonProfile));
+        when(problemTranslationRepository.findByProblemIdAndLanguageCode(1L, "ko"))
+                .thenReturn(Optional.of(translation));
+
+        // when
+        ProblemDetailResponse response = problemService.getProblem(1L, "ko");
+
+        // then
+        assertThat(response.problemId()).isEqualTo(1L);
+        assertThat(response.title()).isEqualTo("A + B");
+        assertThat(response.content()).isEqualTo("두 정수 A와 B의 합을 구하세요.");
+        assertThat(response.inputFormat()).isEqualTo("한 줄에 A와 B가 주어집니다.");
+        assertThat(response.outputFormat()).isEqualTo("A+B 값을 출력합니다.");
+        assertThat(response.language()).isEqualTo("ko");
+        assertThat(response.supportedLanguages()).containsExactly("python3");
+        assertThat(response.defaultLanguage()).isEqualTo("python3");
+    }
+
+    @Test
+    @DisplayName("문제 ID로 단건 조회 시 lang이 ko여도 번역이 없으면 원문을 반환한다")
+    void getProblem_withKoWithoutTranslation_returnsOriginalDetail() {
+        // given
+        Problem problem = mock(Problem.class);
+        ProblemLanguageProfile pythonProfile = mock(ProblemLanguageProfile.class);
+
+        when(problem.getId()).thenReturn(1L);
+        when(problem.getTitle()).thenReturn("A + B");
+        when(problem.getDifficulty()).thenReturn(DifficultyLevel.EASY);
+        when(problem.getContent()).thenReturn("Solve A + B.");
+        when(problem.getInputFormat()).thenReturn("Input A and B.");
+        when(problem.getOutputFormat()).thenReturn("Print A + B.");
+        when(problem.getTimeLimitMs()).thenReturn(1000L);
+        when(problem.getMemoryLimitMb()).thenReturn(256L);
+        when(problem.getTestCases()).thenReturn(List.of());
+
+        when(pythonProfile.getLanguageCode()).thenReturn("python3");
+        when(pythonProfile.getStarterCode()).thenReturn("print('hello')");
+        when(pythonProfile.getIsDefault()).thenReturn(true);
+
+        when(problemRepository.findById(1L)).thenReturn(Optional.of(problem));
+        when(problemLanguageProfileRepository.findByProblemIdOrderByIdAsc(1L))
+                .thenReturn(List.of(pythonProfile));
+        when(problemTranslationRepository.findByProblemIdAndLanguageCode(1L, "ko"))
+                .thenReturn(Optional.empty());
+
+        // when
+        ProblemDetailResponse response = problemService.getProblem(1L, "ko");
+
+        // then
+        assertThat(response.problemId()).isEqualTo(1L);
+        assertThat(response.title()).isEqualTo("A + B");
+        assertThat(response.content()).isEqualTo("Solve A + B.");
+        assertThat(response.inputFormat()).isEqualTo("Input A and B.");
+        assertThat(response.outputFormat()).isEqualTo("Print A + B.");
+        assertThat(response.language()).isEqualTo("en");
     }
 
     @Test
@@ -151,7 +255,7 @@ class ProblemServiceTest {
         when(problemRepository.findById(999L)).thenReturn(Optional.empty());
 
         // when & then
-        assertThatThrownBy(() -> problemService.getProblem(999L))
+        assertThatThrownBy(() -> problemService.getProblem(999L, null))
                 .isInstanceOf(ServiceException.class)
                 .hasMessage("404-1 : 존재하지 않는 문제입니다.");
     }

@@ -48,11 +48,10 @@ cd "$(git rev-parse --show-toplevel)" && set -a && source .env && set +a && pyth
 원문(`problems`)은 유지하고, 번역본은 `problem_translations` 테이블에 upsert됩니다.
 
 ```bash
-cd "$(git rev-parse --show-toplevel)" && python3 -m pip install -U boto3 "psycopg[binary]"
+cd "$(git rev-parse --show-toplevel)" && python3 -m pip install -U "psycopg[binary]" openai
 cd "$(git rev-parse --show-toplevel)" && set -a && source .env && set +a && python3 scripts/translate_problems_ko.py --dry-run --limit 50
-cd "$(git rev-parse --show-toplevel)" && set -a && source .env && set +a && python3 scripts/translate_problems_ko.py --limit 200 --chunk-size 50
+cd "$(git rev-parse --show-toplevel)" && set -a && source .env && set +a && python3 scripts/translate_problems_ko.py --force --limit 200 --chunk-size 50 --request-interval-ms 250
 ```
-
 주의:
 - 운영 환경에서는 EC2 IAM Role에 `TranslateText` 권한이 필요합니다.
 - `--force` 없이 재실행하면 source hash가 동일한 문제는 건너뜁니다.

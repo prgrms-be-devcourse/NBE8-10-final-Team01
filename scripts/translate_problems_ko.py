@@ -6,7 +6,10 @@
 - source 테이블: problems (title/content/input_format/output_format)
 - target 테이블: problem_translations (problem_id + language_code unique)
 - source_hash 비교로 변경 없는 문제는 건너뛰어 재실행(idempotent) 가능
-- AWS Translate 기반 번역 (EC2 IAM Role 환경 권장)
+
+현재 번역 방식:
+- deep-translator의 GoogleTranslator 사용 (비공식 Google 번역 연동)
+- 수식/코드 구간은 보호하고 일반 텍스트만 번역
 """
 
 from __future__ import annotations
@@ -23,18 +26,21 @@ from datetime import datetime
 from typing import Any
 
 psycopg = None
-boto3 = None
+OpenAI = None
 
-# 제목 번역 예외/보정 사전 (필요 시 점진적으로 확장)
 TITLE_OVERRIDES = {
     "GCD Sum": "최대공약수 합",
     "BCPC": "BCPC",
     "1-3-5": "1-3-5",
 }
 
-
+# 긴 패턴부터 먼저 보호
 PROTECTED_SEGMENT_PATTERN = re.compile(
-    r"```[\s\S]*?```|\$\$[\s\S]*?\$\$|(?<!\$)\$(?!\$)(?:\\.|[^$\\])+(?<!\\)\$(?!\$)",
+    r"```[\s\S]*?```"                      # fenced code block
+    r"|`[^`\n]+`"                         # inline code
+    r"|\$\$\$[\s\S]*?\$\$\$"              # Codeforces-style triple-dollar math
+    r"|\$\$[\s\S]*?\$\$"                  # block math
+    r"|(?<!\$)\$(?!\$)(?:\\.|[^$\\])+(?<!\\)\$(?!\$)",  # inline $...$
     re.MULTILINE,
 )
 
@@ -54,22 +60,24 @@ def ensure_psycopg() -> None:
         return
     try:
         import psycopg as _psycopg
-    except ImportError as exc:  # pragma: no cover
+    except ImportError as exc:
         raise SystemExit(
-            "psycopg is required for DB write. Install with: pip install 'psycopg[binary]' boto3"
+            "psycopg is required for DB write. Install with: pip install 'psycopg[binary]' deep-translator"
         ) from exc
     psycopg = _psycopg
 
 
-def ensure_boto3() -> None:
-    global boto3
-    if boto3 is not None:
+def ensure_openai() -> None:
+    global OpenAI
+    if OpenAI is not None:
         return
     try:
-        import boto3 as _boto3
-    except ImportError as exc:  # pragma: no cover
-        raise SystemExit("boto3 is required. Install with: pip install boto3") from exc
-    boto3 = _boto3
+        from openai import OpenAI as _OpenAI
+    except ImportError as exc:
+        raise SystemExit(
+            "openai is required. Install with: pip install openai"
+        ) from exc
+    OpenAI = _OpenAI
 
 
 def default_dsn() -> str:
@@ -79,9 +87,7 @@ def default_dsn() -> str:
     user = os.getenv("DB_USERNAME", "back")
     password = os.getenv("DB_PASSWORD")
     if not password:
-        raise ValueError(
-            "DB_PASSWORD is required. Export .env or pass --dsn/LOAD_DSN."
-        )
+        raise ValueError("DB_PASSWORD is required. Export .env or pass --dsn/LOAD_DSN.")
     return f"postgresql://{user}:{password}@{host}:{port}/{name}"
 
 
@@ -96,14 +102,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--language-code", default="ko")
     parser.add_argument("--source-lang", default="en")
     parser.add_argument(
-        "--aws-region", default=os.getenv("AWS_REGION", "ap-northeast-2")
+        "--model",
+        default=os.getenv("OPENAI_TRANSLATE_MODEL", "gpt-5-nano"),
+        help="OpenAI model name",
     )
-    parser.add_argument("--max-bytes-per-request", type=int, default=9000)
+    parser.add_argument(
+        "--max-bytes-per-request",
+        type=int,
+        default=4500,
+        help="Translate request chunk size in UTF-8 bytes",
+    )
     parser.add_argument(
         "--request-interval-ms",
         type=int,
-        default=120,
-        help="Translate API call interval in milliseconds",
+        default=250,
+        help="Translate request interval in milliseconds",
     )
     parser.add_argument(
         "--max-retries",
@@ -124,8 +137,8 @@ def ensure_schema(cur: Any) -> None:
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS problem_translations (
-            id BIGSERIAL PRIMARY KEY,
-            problem_id BIGINT NOT NULL REFERENCES problems(id) ON DELETE CASCADE,
+                                                            id BIGSERIAL PRIMARY KEY,
+                                                            problem_id BIGINT NOT NULL REFERENCES problems(id) ON DELETE CASCADE,
             language_code VARCHAR(10) NOT NULL,
             title TEXT NOT NULL,
             content TEXT NOT NULL,
@@ -137,13 +150,13 @@ def ensure_schema(cur: Any) -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             modified_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             CONSTRAINT uq_problem_translations_problem_lang UNIQUE (problem_id, language_code)
-        )
+            )
         """
     )
     cur.execute(
         """
         CREATE INDEX IF NOT EXISTS idx_problem_translations_lang_problem
-        ON problem_translations (language_code, problem_id)
+            ON problem_translations (language_code, problem_id)
         """
     )
 
@@ -173,7 +186,7 @@ def fetch_problem_rows(cur: Any, offset: int, limit: int) -> list[ProblemRow]:
 
 
 def fetch_existing_hashes(
-    cur: Any, problem_ids: list[int], language_code: str
+        cur: Any, problem_ids: list[int], language_code: str
 ) -> dict[int, str]:
     if not problem_ids:
         return {}
@@ -209,6 +222,7 @@ def split_text_by_bytes(text: str, max_bytes: int) -> list[str]:
     chunks: list[str] = []
     parts = re.split(r"(\n\n+)", text)
     current = ""
+
     for part in parts:
         if not part:
             continue
@@ -222,7 +236,6 @@ def split_text_by_bytes(text: str, max_bytes: int) -> list[str]:
             chunks.append(current)
             current = ""
 
-        # 단일 part가 너무 긴 경우 강제로 문자 단위 분할
         if len(part.encode("utf-8")) > max_bytes:
             segment = ""
             for ch in part:
@@ -245,7 +258,7 @@ def split_text_by_bytes(text: str, max_bytes: int) -> list[str]:
 
 
 def translate_text_chunks(
-    translator: "AwsTranslateClient", text: str, max_bytes_per_request: int
+        translator: "OpenAITranslateClient", text: str, max_bytes_per_request: int
 ) -> str:
     if not text:
         return text
@@ -255,18 +268,17 @@ def translate_text_chunks(
 
 
 def translate_with_protected_segments(
-    translator: "AwsTranslateClient", text: str, max_bytes_per_request: int
+        translator: "OpenAITranslateClient", text: str, max_bytes_per_request: int
 ) -> str:
     """
     수식/코드 구간은 원문 그대로 유지하고 일반 텍스트만 번역한다.
-    placeholder 치환 방식보다 안전하게 수식 훼손을 방지한다.
     """
     result: list[str] = []
     cursor = 0
 
     for match in PROTECTED_SEGMENT_PATTERN.finditer(text):
         if match.start() > cursor:
-            plain = text[cursor : match.start()]
+            plain = text[cursor:match.start()]
             result.append(translate_text_chunks(translator, plain, max_bytes_per_request))
         result.append(match.group(0))
         cursor = match.end()
@@ -282,48 +294,47 @@ def normalize_translated_text(text: str) -> str:
     if not text:
         return text
 
-    # ".그는" / "?이것" 형태를 ". 그는" / "? 이것"으로 보정
-    normalized = re.sub(r"([.!?])([가-힣A-Za-z])", r"\1 \2", text)
-    # 닫는 괄호/따옴표 뒤 공백이 사라진 경우 보정
+    normalized = text
+    normalized = re.sub(r"([.!?])([가-힣A-Za-z])", r"\1 \2", normalized)
     normalized = re.sub(r"([)\]\"'])([가-힣A-Za-z])", r"\1 \2", normalized)
-    # 과도한 공백 축소
     normalized = re.sub(r"[ \t]{2,}", " ", normalized)
 
     lines = [line.strip() for line in normalized.splitlines()]
     normalized = "\n".join(lines)
     normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+
     return normalized.strip()
 
 
 def normalize_translated_title(original_title: str, translated_title: str) -> str:
     original = (original_title or "").strip()
     translated = (translated_title or "").strip()
+
     if not translated:
         return original
 
     if original in TITLE_OVERRIDES:
         return TITLE_OVERRIDES[original]
 
-    # 대회 약어/코드 형태는 원문 유지가 자연스럽다.
-    if re.fullmatch(r"[A-Z0-9][A-Z0-9\- ]{1,20}", original):
+    if re.fullmatch(r"[A-Z0-9][A-Z0-9 -]{1,20}", original):
         return original
 
     return normalize_translated_text(translated)
 
-
-class AwsTranslateClient:
+class OpenAITranslateClient:
     def __init__(
-        self,
-        region: str,
-        source_lang: str,
-        target_lang: str,
-        max_retries: int,
-        request_interval_ms: int,
+            self,
+            source_lang: str,
+            target_lang: str,
+            model: str,
+            max_retries: int,
+            request_interval_ms: int,
     ) -> None:
-        ensure_boto3()
-        self.client = boto3.client("translate", region_name=region)
+        ensure_openai()
+        self.client = OpenAI()
         self.source_lang = source_lang
         self.target_lang = target_lang
+        self.model = model
         self.max_retries = max_retries
         self.request_interval_ms = request_interval_ms
 
@@ -331,32 +342,43 @@ class AwsTranslateClient:
         if not text:
             return text
 
+        system_prompt = (
+            f"You are a professional translator. "
+            f"Translate the user's text from {self.source_lang} to {self.target_lang}. "
+            f"Preserve meaning faithfully. "
+            f"Do not add explanations, notes, markdown fences, or commentary. "
+            f"Return only the translated text."
+        )
+
         for attempt in range(1, self.max_retries + 1):
             try:
-                response = self.client.translate_text(
-                    Text=text,
-                    SourceLanguageCode=self.source_lang,
-                    TargetLanguageCode=self.target_lang,
+                response = self.client.responses.create(
+                    model=self.model,
+                    input=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": text},
+                    ],
                 )
-                result = response.get("TranslatedText")
+                result = response.output_text
                 if isinstance(result, str) and result.strip():
                     if self.request_interval_ms > 0:
                         time.sleep(self.request_interval_ms / 1000.0)
                     return result
-                raise RuntimeError("AWS Translate returned empty TranslatedText")
+                raise RuntimeError("OpenAI returned empty output_text")
             except Exception:
                 if attempt >= self.max_retries:
                     raise
-                time.sleep(min(2.0, 0.4 * attempt))
+                time.sleep(min(2.0, 0.5 * attempt))
+
         return text
 
 
 def translate_field(
-    translator: AwsTranslateClient,
-    text: str | None,
-    max_bytes_per_request: int,
-    *,
-    protect_segments: bool,
+        translator: OpenAITranslateClient,
+        text: str | None,
+        max_bytes_per_request: int,
+        *,
+        protect_segments: bool,
 ) -> str | None:
     if text is None:
         return None
@@ -374,15 +396,15 @@ def translate_field(
 
 
 def upsert_translation(
-    cur: Any,
-    problem_id: int,
-    language_code: str,
-    title: str,
-    content: str,
-    input_format: str | None,
-    output_format: str | None,
-    src_hash: str,
-    provider: str,
+        cur: Any,
+        problem_id: int,
+        language_code: str,
+        title: str,
+        content: str,
+        input_format: str | None,
+        output_format: str | None,
+        src_hash: str,
+        provider: str,
 ) -> None:
     cur.execute(
         """
@@ -397,15 +419,15 @@ def upsert_translation(
             provider
         )
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (problem_id, language_code) DO UPDATE SET
+            ON CONFLICT (problem_id, language_code) DO UPDATE SET
             title = EXCLUDED.title,
-            content = EXCLUDED.content,
-            input_format = EXCLUDED.input_format,
-            output_format = EXCLUDED.output_format,
-            source_hash = EXCLUDED.source_hash,
-            provider = EXCLUDED.provider,
-            translated_at = NOW(),
-            modified_at = NOW()
+                                                           content = EXCLUDED.content,
+                                                           input_format = EXCLUDED.input_format,
+                                                           output_format = EXCLUDED.output_format,
+                                                           source_hash = EXCLUDED.source_hash,
+                                                           provider = EXCLUDED.provider,
+                                                           translated_at = NOW(),
+                                                           modified_at = NOW()
         """,
         (
             problem_id,
@@ -441,7 +463,7 @@ def main() -> int:
 
     conn = None
     cur = None
-    translator: AwsTranslateClient | None = None
+    translator: OpenAITranslateClient | None = None
 
     try:
         ensure_psycopg()
@@ -451,10 +473,10 @@ def main() -> int:
         ensure_schema(cur)
         conn.commit()
 
-        translator = AwsTranslateClient(
-            region=args.aws_region,
+        translator = OpenAITranslateClient(
             source_lang=args.source_lang,
             target_lang=args.language_code,
+            model=args.model,
             max_retries=args.max_retries,
             request_interval_ms=args.request_interval_ms,
         )
@@ -487,6 +509,7 @@ def main() -> int:
                         protect_segments=False,
                     )
                     t_title = normalize_translated_title(row.title, t_title or row.title)
+
                     t_content = translate_field(
                         translator,
                         row.content,
@@ -519,7 +542,7 @@ def main() -> int:
                         input_format=t_input,
                         output_format=t_output,
                         src_hash=src_hash,
-                        provider=f"aws-translate:{args.aws_region}:mask-v1",
+                        provider=f"openai:{args.model}:v1",
                     )
                     stats["translated"] += 1
                 except Exception as exc:
