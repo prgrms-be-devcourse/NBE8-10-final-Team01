@@ -141,7 +141,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint("/ws")
-                .setAllowedOriginPatterns("https://www.the-bracket.site")
+                .setAllowedOriginPatterns("https://www.the-bracket.site", "*")
                 .withSockJS();
     }
 }
