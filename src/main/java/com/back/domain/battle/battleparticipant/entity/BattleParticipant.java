@@ -36,6 +36,9 @@ public class BattleParticipant extends BaseEntity {
     private Long scoreDelta; // 이 판으로 변동된 점수
     private LocalDateTime finishTime; // 문제를 다 푼 시각
 
+    @jakarta.persistence.Column(name = "is_result_checked", nullable = false)
+    private boolean isResultChecked = true; // 결과 확인 여부 (settle 시 false, 결과 조회 시 true)
+
     public static BattleParticipant create(BattleRoom battleRoom, Member member) {
         BattleParticipant participant = new BattleParticipant();
         participant.battleRoom = battleRoom;
@@ -50,12 +53,16 @@ public class BattleParticipant extends BaseEntity {
     }
 
     public void complete(LocalDateTime finishTime) {
-        this.status = BattleParticipantStatus.EXIT;
+        this.status = BattleParticipantStatus.SOLVED;
         this.finishTime = finishTime;
     }
 
     public void abandon() {
         this.status = BattleParticipantStatus.ABANDONED;
+    }
+
+    public void timeout() {
+        this.status = BattleParticipantStatus.TIMEOUT;
     }
 
     public void quit() {
@@ -65,5 +72,13 @@ public class BattleParticipant extends BaseEntity {
     public void applyResult(int rank, long delta) {
         this.finalRank = rank;
         this.scoreDelta = delta;
+    }
+
+    public void markUnchecked() {
+        this.isResultChecked = false;
+    }
+
+    public void markChecked() {
+        this.isResultChecked = true;
     }
 }

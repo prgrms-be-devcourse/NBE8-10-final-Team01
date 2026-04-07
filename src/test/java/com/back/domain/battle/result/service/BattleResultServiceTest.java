@@ -28,6 +28,7 @@ import com.back.domain.problem.problem.entity.Problem;
 import com.back.domain.problem.submission.repository.SubmissionRepository;
 import com.back.domain.rating.profile.service.RatingProfileService;
 import com.back.global.exception.ServiceException;
+import com.back.global.websocket.BattleCodeStore;
 import com.back.global.websocket.pubsub.WebSocketMessagePublisher;
 
 class BattleResultServiceTest {
@@ -39,7 +40,12 @@ class BattleResultServiceTest {
     private final WebSocketMessagePublisher publisher = mock(WebSocketMessagePublisher.class);
 
     private final BattleResultService battleResultService = new BattleResultService(
-            battleRoomRepository, battleParticipantRepository, submissionRepository, ratingProfileService, publisher);
+            battleRoomRepository,
+            battleParticipantRepository,
+            submissionRepository,
+            ratingProfileService,
+            publisher,
+            mock(BattleCodeStore.class));
 
     @Test
     @DisplayName("내 전적 조회 성공 시 battleResults와 pageInfo를 반환한다")
@@ -59,7 +65,7 @@ class BattleResultServiceTest {
         when(participant.getBattleRoom()).thenReturn(room);
         when(participant.getFinalRank()).thenReturn(2);
         when(participant.getScoreDelta()).thenReturn(70L);
-        when(participant.getStatus()).thenReturn(BattleParticipantStatus.EXIT);
+        when(participant.getStatus()).thenReturn(BattleParticipantStatus.SOLVED);
         when(participant.getFinishTime()).thenReturn(finishTime);
 
         when(room.getId()).thenReturn(101L);

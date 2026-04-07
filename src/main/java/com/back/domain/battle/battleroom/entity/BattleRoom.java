@@ -22,6 +22,14 @@ public class BattleRoom extends BaseEntity {
     @SequenceGenerator(name = "battle_room_seq_gen", sequenceName = "battle_room_id_seq", allocationSize = 50)
     private Long id;
 
+    /**
+     * 낙관적 락 — settle() 동시 진입 시 하나만 커밋 성공하도록 보장.
+     * idempotent 체크(if FINISHED return)가 대부분의 중복 호출을 차단하고,
+     * 낙관적 락은 두 트랜잭션이 동시에 체크를 통과한 극히 드문 race condition을 DB 레벨에서 차단한다.
+     */
+    @Version
+    private Long version;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "problem_id")
     private Problem problem;

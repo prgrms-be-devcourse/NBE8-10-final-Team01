@@ -24,8 +24,10 @@ import com.back.domain.problem.testcase.entity.TestCase;
 import com.back.global.judge.dto.Judge0SubmitRequest;
 import com.back.global.judge.dto.Judge0SubmitResponse;
 import com.back.global.judge.event.JudgeRequestedEvent;
+import com.back.global.websocket.BattleTimerStore;
 import com.back.global.websocket.pubsub.WebSocketMessagePublisher;
 
+import jakarta.persistence.OptimisticLockException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -40,6 +42,7 @@ public class JudgeService {
     private final BattleRoomRepository battleRoomRepository;
     private final MemberRepository memberRepository;
     private final BattleResultService battleResultService;
+    private final BattleTimerStore battleTimerStore;
     private final WebSocketMessagePublisher publisher;
 
     /**
@@ -137,7 +140,7 @@ public class JudgeService {
                 .orElseThrow(() -> new IllegalStateException("Participant not found"));
 
         /*
-         * status: PLAYING에서 EXIT
+         * status: PLAYING에서 SOLVED
          * finishTime 기록
          */
         participant.complete(LocalDateTime.now());
@@ -145,7 +148,7 @@ public class JudgeService {
 
         List<BattleParticipant> allParticipants = battleParticipantRepository.findByBattleRoom(room);
         long completedCount = allParticipants.stream()
-                .filter(p -> p.getStatus() == BattleParticipantStatus.EXIT)
+                .filter(p -> p.getStatus() == BattleParticipantStatus.SOLVED)
                 .count();
         // PARTICIPANT_DONE 브로드캐스트
         publisher.publish(
@@ -153,17 +156,18 @@ public class JudgeService {
                 Map.of("type", "PARTICIPANT_DONE", "userId", memberId, "rank", completedCount));
 
         /*
-         * 전원 EXIT 체크
+         * 전원 SOLVED 체크
          *     → 아직 남은 사람 있으면 종료
-         *     → 전원 완료면 battleResultService.settle() 호출
-         *         → 순위/점수 계산
-         *         → member.score 갱신
-         *         → room.finish() → status: FINISHED
-         *         → BATTLE_FINISHED 브로드캐스트
+         *     → 전원 완료면 타이머 취소 후 즉시 settle()
          */
-        boolean allFinished = allParticipants.stream().allMatch(p -> p.getStatus() == BattleParticipantStatus.EXIT);
+        boolean allFinished = allParticipants.stream().allMatch(p -> p.getStatus() == BattleParticipantStatus.SOLVED);
         if (allFinished) {
-            battleResultService.settle(roomId);
+            battleTimerStore.cancel(roomId);
+            try {
+                battleResultService.settle(roomId);
+            } catch (OptimisticLockException e) {
+                log.info("settle 낙관적 락 충돌 - 이미 정산 완료됨 roomId={}", roomId);
+            }
         }
     }
 

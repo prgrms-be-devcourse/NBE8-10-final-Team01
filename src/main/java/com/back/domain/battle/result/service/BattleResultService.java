@@ -27,6 +27,7 @@ import com.back.domain.battle.result.dto.BattleResultResponse;
 import com.back.domain.battle.result.dto.BattleResultResponse.ParticipantResult;
 import com.back.domain.battle.result.dto.MyBattleResultsResponse;
 import com.back.domain.battle.result.dto.RoomListResponse;
+import com.back.domain.battle.result.dto.UncheckedResultResponse;
 import com.back.domain.problem.submission.entity.Submission;
 import com.back.domain.problem.submission.entity.SubmissionResult;
 import com.back.domain.problem.submission.repository.SubmissionRepository;
@@ -72,6 +73,12 @@ public class BattleResultService {
         // 2. 모든 참여자 조회
         List<BattleParticipant> participants = battleParticipantRepository.findByBattleRoom(room);
 
+        // 2-1. 시간 종료 시점까지 아직 PLAYING인 참여자를 TIMEOUT으로 명시적 전환
+        //      ABANDONED(네트워크 이탈)와 구분: TIMEOUT은 끝까지 도전했으나 시간 초과
+        participants.stream()
+                .filter(p -> p.getStatus() == BattleParticipantStatus.PLAYING)
+                .forEach(BattleParticipant::timeout);
+
         // 3. 각 참여자 score 미리 계산 (DB 쿼리를 정렬 전에 한 번씩만 실행)
         //    Comparator 안에서 calcScore() 호출 시 O(N log N) 횟수만큼 DB 조회가 발생하는 문제 방지
         Map<Long, Long> scoreMap =
@@ -92,7 +99,7 @@ public class BattleResultService {
         int rank = 1;
         int totalParticipants = sorted.size();
         for (BattleParticipant participant : sorted) {
-            boolean isAC = participant.getStatus() == BattleParticipantStatus.EXIT;
+            boolean isAC = participant.getStatus() == BattleParticipantStatus.SOLVED;
             long scoreDelta = 0L;
             if (isAC && rank <= SCORE_TABLE.length) {
                 scoreDelta = SCORE_TABLE[rank - 1];
@@ -123,21 +130,47 @@ public class BattleResultService {
                     participant.getMember(), room.getProblem(), participant.getFinishTime());
         }
 
-        // 6. BattleRoom 종료
+        // 6. 모든 참여자 결과 미확인 상태로 전환 (재접속 시 결과 화면 유도)
+        participants.forEach(BattleParticipant::markUnchecked);
+
+        // 7. BattleRoom 종료
         room.finish();
 
-        // 7. WebSocket 브로드캐스트 — 커밋 후 전송으로 프론트가 확정된 DB 상태를 읽도록 보장
+        // 8. WebSocket 브로드캐스트 — 커밋 후 전송으로 프론트가 확정된 DB 상태를 읽도록 보장
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
                 // 커밋 후이므로 예외를 전파해도 트랜잭션 롤백이 불가능하고,
                 // 클라이언트에게 500이 반환되어 DB는 성공했는데 실패로 인식하는 혼란을 유발함.
                 // WebSocket은 실시간 알림 역할이므로 전송 실패가 치명적이지 않아 예외를 삼키고 로그만 남김.
+
+                // 방 채널 브로드캐스트 (방 내 구독자 및 관전자)
                 try {
                     publisher.publish("/topic/room/" + roomId, Map.of("type", "BATTLE_FINISHED"));
                 } catch (Exception e) {
                     log.error("BATTLE_FINISHED WebSocket 전송 실패 roomId={}", roomId, e);
                 }
+
+                // 개인 채널 알림 — 방을 나간 참여자(AC 후 이탈)도 결과를 즉시 수신 가능
+                for (BattleParticipant p : sorted) {
+                    try {
+                        publisher.publish(
+                                "/topic/user/" + p.getMember().getId() + "/battle",
+                                Map.of(
+                                        "type",
+                                        "BATTLE_RESULT",
+                                        "roomId",
+                                        roomId,
+                                        "rank",
+                                        p.getFinalRank(),
+                                        "scoreDelta",
+                                        p.getScoreDelta()));
+                    } catch (Exception e) {
+                        log.error("개인 알림 전송 실패 memberId={}", p.getMember().getId(), e);
+                    }
+                }
+
+                // 방 종료 후 관전용 코드 Redis 정리
                 try {
                     battleCodeStore.deleteAllByRoom(roomId);
                 } catch (Exception e) {
@@ -208,7 +241,7 @@ public class BattleResultService {
      * 미통과 참여자: Long.MAX_VALUE
      */
     private long calcScore(BattleParticipant participant, BattleRoom room) {
-        if (participant.getStatus() != BattleParticipantStatus.EXIT) {
+        if (participant.getStatus() != BattleParticipantStatus.SOLVED) {
             return Long.MAX_VALUE;
         }
 
@@ -227,6 +260,28 @@ public class BattleResultService {
                 room, participant.getMember(), SubmissionResult.WA, participant.getFinishTime());
 
         return elapsedSeconds + (waPenaltyCount * WA_PENALTY_SECONDS);
+    }
+
+    /**
+     * 로그인 유저의 미확인 배틀 결과 조회 (가장 최근 1건).
+     * 브라우저를 닫고 재접속한 경우 이 API로 결과 화면으로 유도한다.
+     */
+    @Transactional(readOnly = true)
+    public UncheckedResultResponse getUncheckedResult(Long memberId) {
+        return battleParticipantRepository.findUncheckedResultsByMemberId(memberId, PageRequest.of(0, 1)).stream()
+                .findFirst()
+                .map(UncheckedResultResponse::from)
+                .orElse(null);
+    }
+
+    /**
+     * 결과 확인 처리 — 결과 화면 진입 시 호출.
+     */
+    @Transactional
+    public void checkResult(Long roomId, Long memberId) {
+        battleParticipantRepository
+                .findByBattleRoomIdAndMemberId(roomId, memberId)
+                .ifPresent(BattleParticipant::markChecked);
     }
 
     @Transactional(readOnly = true)
