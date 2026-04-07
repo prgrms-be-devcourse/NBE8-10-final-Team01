@@ -234,7 +234,7 @@ jobs:
               --restart unless-stopped \
               --network "${NET}" \
               -e TZ=Asia/Seoul \
-              -v /tmp/.env:/app/.env:ro \
+              --env-file /tmp/.env \
               "${IMAGE}"
 
             # 헬스체크 (/actuator/health 200 OK까지 대기)
