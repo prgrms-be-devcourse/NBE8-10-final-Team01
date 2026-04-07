@@ -36,7 +36,7 @@ public class BattleParticipant extends BaseEntity {
     private Long scoreDelta; // 이 판으로 변동된 점수
     private LocalDateTime finishTime; // 문제를 다 푼 시각
 
-    @jakarta.persistence.Column(name = "is_result_checked", nullable = false)
+    @Column(name = "is_result_checked", nullable = false, columnDefinition = "boolean default true")
     private boolean isResultChecked = true; // 결과 확인 여부 (settle 시 false, 결과 조회 시 true)
 
     public static BattleParticipant create(BattleRoom battleRoom, Member member) {
