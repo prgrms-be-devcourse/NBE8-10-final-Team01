@@ -15,8 +15,8 @@ import com.back.domain.matching.queue.model.Difficulty;
 import com.back.domain.matching.queue.model.MatchSession;
 import com.back.domain.matching.queue.model.MatchSessionStatus;
 import com.back.domain.matching.queue.model.QueueKey;
+import com.back.domain.matching.queue.model.ReadyDecision;
 import com.back.domain.matching.queue.model.WaitingUser;
-import com.back.domain.matching.queue.store.InMemoryMatchStateStore;
 import com.back.domain.matching.queue.store.MatchStateStore;
 import com.back.domain.matching.queue.store.MatchingStoreProperties;
 import com.back.global.exception.ServiceException;
@@ -27,19 +27,17 @@ class RedisMatchStateStoreTest {
     private FakeStringRedisTemplate redisTemplate;
     private MatchingRedisSerializer serializer;
     private RedisMatchStateStore store;
-    private InMemoryMatchStateStore delegate;
 
     @BeforeEach
     void setUp() {
         redisTemplate = new FakeStringRedisTemplate();
         serializer = new MatchingRedisSerializer(
                 JsonMapper.builder().findAndAddModules().build());
-        delegate = new InMemoryMatchStateStore();
 
         MatchingStoreProperties properties = new MatchingStoreProperties();
         properties.setType(MatchingStoreProperties.StoreType.REDIS);
 
-        store = new RedisMatchStateStore(redisTemplate, serializer, properties, delegate);
+        store = new RedisMatchStateStore(redisTemplate, serializer, properties);
     }
 
     @Test
@@ -100,49 +98,8 @@ class RedisMatchStateStoreTest {
     }
 
     @Test
-    @DisplayName("인원이 부족하면 pollMatchCandidates 는 null 을 반환한다")
-    void pollMatchCandidates_returnsNullWhenQueueIsShort() {
-        QueueKey queueKey = queueKey();
-        store.enqueue(1L, "m1", queueKey);
-        store.enqueue(2L, "m2", queueKey);
-        store.enqueue(3L, "m3", queueKey);
-
-        List<WaitingUser> matchedUsers = store.pollMatchCandidates(queueKey, 4);
-
-        assertThat(matchedUsers).isNull();
-    }
-
-    @Test
-    @DisplayName("pollMatchCandidates 는 Redis queue 에서 FIFO 순서로 4명을 꺼낸다")
-    void pollMatchCandidates_returnsFifoUsers() {
-        QueueKey queueKey = queueKey();
-        enqueueUsers(queueKey, 4);
-
-        List<WaitingUser> matchedUsers = store.pollMatchCandidates(queueKey, 4);
-
-        assertThat(matchedUsers).extracting(WaitingUser::getUserId).containsExactly(1L, 2L, 3L, 4L);
-        assertThat(store.getWaitingCount(queueKey)).isEqualTo(0);
-    }
-
-    @Test
-    @DisplayName("rollbackPolledUsers 는 queue 순서와 userQueue index 를 함께 복구한다")
-    void rollbackPolledUsers_restoresQueueOrderAndUserQueue() {
-        QueueKey queueKey = queueKey();
-        enqueueUsers(queueKey, 4);
-        List<WaitingUser> matchedUsers = store.pollMatchCandidates(queueKey, 4);
-
-        store.rollbackPolledUsers(queueKey, matchedUsers);
-
-        List<WaitingUser> restoredUsers = store.pollMatchCandidates(queueKey, 4);
-
-        assertThat(restoredUsers).extracting(WaitingUser::getUserId).containsExactly(1L, 2L, 3L, 4L);
-        assertThat(redisTemplate.opsForValue().get(MatchingRedisKeys.userQueue(1L)))
-                .isNotNull();
-    }
-
-    @Test
-    @DisplayName("markAcceptPending 은 userQueue Redis key 를 정리하고 ready-check 본문은 인메모리 delegate 에 저장한다")
-    void markAcceptPending_handsOffToInMemoryDelegate() {
+    @DisplayName("markAcceptPending 은 match 문서와 userMatch 인덱스를 함께 저장하고 userQueue 를 삭제한다")
+    void markAcceptPending_storesReadyCheckStateInRedis() {
         QueueKey queueKey = queueKey();
         enqueueUsers(queueKey, 4);
         List<WaitingUser> matchedUsers = store.pollMatchCandidates(queueKey, 4);
@@ -151,9 +108,148 @@ class RedisMatchStateStoreTest {
                 store.markAcceptPending(queueKey, matchedUsers, LocalDateTime.of(2026, 4, 6, 12, 30, 0));
 
         assertThat(matchSession.status()).isEqualTo(MatchSessionStatus.ACCEPT_PENDING);
+        assertThat(redisTemplate.opsForValue().get(MatchingRedisKeys.match(matchSession.matchId())))
+                .isNotNull();
+        assertThat(redisTemplate.opsForValue().get(MatchingRedisKeys.userMatch(1L)))
+                .isEqualTo(String.valueOf(matchSession.matchId()));
         assertThat(redisTemplate.opsForValue().get(MatchingRedisKeys.userQueue(1L)))
                 .isNull();
-        assertThat(delegate.findMatchSessionByUserId(1L)).isNotNull();
+    }
+
+    @Test
+    @DisplayName("findMatchSessionByUserId 는 Redis ready-check 세션을 읽고 stale link 를 정리한다")
+    void findMatchSessionByUserId_readsSessionAndCleansStaleLink() {
+        MatchSession matchSession = createAcceptPendingMatch(LocalDateTime.of(2026, 4, 6, 12, 30, 0));
+
+        MatchSession found = store.findMatchSessionByUserId(1L);
+
+        assertThat(found).isNotNull();
+        assertThat(found.matchId()).isEqualTo(matchSession.matchId());
+
+        redisTemplate.opsForValue().set(MatchingRedisKeys.userMatch(99L), "999");
+        assertThat(store.findMatchSessionByUserId(99L)).isNull();
+        assertThat(redisTemplate.opsForValue().get(MatchingRedisKeys.userMatch(99L)))
+                .isNull();
+    }
+
+    @Test
+    @DisplayName("accept 는 decision 을 갱신하고 중복 accept 는 현재 상태를 유지한다")
+    void accept_updatesDecisionAndKeepsDuplicateAccept() {
+        MatchSession matchSession = createAcceptPendingMatch(LocalDateTime.now().plusSeconds(30));
+
+        MatchSession accepted = store.accept(matchSession.matchId(), 1L);
+        MatchSession duplicated = store.accept(matchSession.matchId(), 1L);
+
+        assertThat(accepted.decisionOf(1L)).isEqualTo(ReadyDecision.ACCEPTED);
+        assertThat(duplicated.decisionOf(1L)).isEqualTo(ReadyDecision.ACCEPTED);
+        assertThat(duplicated.acceptedCount()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("decline 은 CANCELLED 로 전이한다")
+    void decline_returnsCancelled() {
+        MatchSession matchSession = createAcceptPendingMatch(LocalDateTime.now().plusSeconds(30));
+
+        MatchSession declined = store.decline(matchSession.matchId(), 2L);
+
+        assertThat(declined.status()).isEqualTo(MatchSessionStatus.CANCELLED);
+        assertThat(declined.decisionOf(2L)).isEqualTo(ReadyDecision.DECLINED);
+    }
+
+    @Test
+    @DisplayName("deadline 이 지난 세션에서 accept 하면 EXPIRED 를 우선 반영한다")
+    void accept_returnsExpiredWhenDeadlinePassed() {
+        MatchSession matchSession = createAcceptPendingMatch(LocalDateTime.now().minusSeconds(1));
+
+        MatchSession expired = store.accept(matchSession.matchId(), 1L);
+
+        assertThat(expired.status()).isEqualTo(MatchSessionStatus.EXPIRED);
+    }
+
+    @Test
+    @DisplayName("tryBeginRoomCreation 은 마지막 accept 경쟁에서도 한 번만 선점한다")
+    void tryBeginRoomCreation_acquiresOnlyOnce() {
+        MatchSession matchSession = createAcceptPendingMatch(LocalDateTime.now().plusSeconds(30));
+        store.accept(matchSession.matchId(), 1L);
+        store.accept(matchSession.matchId(), 2L);
+        store.accept(matchSession.matchId(), 3L);
+        store.accept(matchSession.matchId(), 4L);
+
+        MatchStateStore.RoomCreationAttempt firstAttempt = store.tryBeginRoomCreation(matchSession.matchId());
+        MatchStateStore.RoomCreationAttempt secondAttempt = store.tryBeginRoomCreation(matchSession.matchId());
+
+        assertThat(firstAttempt.acquired()).isTrue();
+        assertThat(firstAttempt.matchSession().status()).isEqualTo(MatchSessionStatus.ROOM_CREATING);
+        assertThat(secondAttempt.acquired()).isFalse();
+        assertThat(secondAttempt.matchSession().status()).isEqualTo(MatchSessionStatus.ROOM_CREATING);
+    }
+
+    @Test
+    @DisplayName("markRoomReady 와 clearMatchedRoom 은 참가자 참조를 기준으로 세션을 정리한다")
+    void markRoomReadyAndClearMatchedRoom_cleanupByReferences() {
+        MatchSession matchSession = createAcceptPendingMatch(LocalDateTime.now().plusSeconds(30));
+        store.accept(matchSession.matchId(), 1L);
+        store.accept(matchSession.matchId(), 2L);
+        store.accept(matchSession.matchId(), 3L);
+        store.accept(matchSession.matchId(), 4L);
+        store.tryBeginRoomCreation(matchSession.matchId());
+
+        MatchSession roomReady = store.markRoomReady(matchSession.matchId(), 100L);
+        store.clearMatchedRoom(1L, 100L);
+
+        assertThat(roomReady.status()).isEqualTo(MatchSessionStatus.ROOM_READY);
+        assertThat(store.findMatchSessionByUserId(1L)).isNull();
+        assertThat(store.findMatchSessionByUserId(2L)).isNotNull();
+
+        store.clearMatchedRoom(2L, 100L);
+        store.clearMatchedRoom(3L, 100L);
+        store.clearMatchedRoom(4L, 100L);
+
+        assertThat(redisTemplate.opsForValue().get(MatchingRedisKeys.match(matchSession.matchId())))
+                .isNull();
+    }
+
+    @Test
+    @DisplayName("clearTerminalMatch 는 match 문서와 userMatch 인덱스를 함께 정리한다")
+    void clearTerminalMatch_removesMatchAndUserLinks() {
+        MatchSession matchSession = createAcceptPendingMatch(LocalDateTime.now().plusSeconds(30));
+        store.decline(matchSession.matchId(), 1L);
+
+        store.clearTerminalMatch(matchSession.matchId());
+
+        assertThat(redisTemplate.opsForValue().get(MatchingRedisKeys.match(matchSession.matchId())))
+                .isNull();
+        assertThat(redisTemplate.opsForValue().get(MatchingRedisKeys.userMatch(1L)))
+                .isNull();
+        assertThat(redisTemplate.opsForValue().get(MatchingRedisKeys.userMatch(4L)))
+                .isNull();
+    }
+
+    @Test
+    @DisplayName("findExpiredAcceptPendingMatchIds 는 임시 match key scan 기준으로 만료 세션만 반환한다")
+    void findExpiredAcceptPendingMatchIds_returnsExpiredMatches() {
+        MatchSession expired = createAcceptPendingMatch(LocalDateTime.now().minusSeconds(1));
+        MatchSession active = createAcceptPendingMatch(LocalDateTime.now().plusSeconds(30), 11L);
+
+        List<Long> expiredMatchIds = store.findExpiredAcceptPendingMatchIds(LocalDateTime.now());
+
+        assertThat(expiredMatchIds).contains(expired.matchId());
+        assertThat(expiredMatchIds).doesNotContain(active.matchId());
+    }
+
+    private MatchSession createAcceptPendingMatch(LocalDateTime deadline) {
+        return createAcceptPendingMatch(deadline, 1L);
+    }
+
+    private MatchSession createAcceptPendingMatch(LocalDateTime deadline, long startUserId) {
+        QueueKey queueKey = queueKey();
+        List<WaitingUser> matchedUsers = List.of(
+                new WaitingUser(startUserId, "m" + startUserId, queueKey),
+                new WaitingUser(startUserId + 1, "m" + (startUserId + 1), queueKey),
+                new WaitingUser(startUserId + 2, "m" + (startUserId + 2), queueKey),
+                new WaitingUser(startUserId + 3, "m" + (startUserId + 3), queueKey));
+
+        return store.markAcceptPending(queueKey, matchedUsers, deadline);
     }
 
     private QueueKey queueKey() {

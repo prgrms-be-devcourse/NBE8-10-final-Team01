@@ -49,3 +49,7 @@ logging:
   level:
     root: WARN
     com.back: INFO
+
+matching:
+  store:
+    type: redis

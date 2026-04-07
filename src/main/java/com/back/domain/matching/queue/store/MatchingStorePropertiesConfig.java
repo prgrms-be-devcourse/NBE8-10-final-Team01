@@ -4,10 +4,10 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Configuration;
 
 /**
- * matching 저장소 설정 바인딩만 먼저 연다.
+ * matching 저장소 설정 바인딩을 연다.
  *
- * 이번 단계에서는 구현체 스위칭까지 연결하지 않고,
- * 설정 키와 바인딩 구조만 안전하게 고정한다.
+ * 구현체 선택은 `matching.store.type` 값으로 제어하고,
+ * 각 저장소 구현체는 조건부 빈으로 연결한다.
  */
 @Configuration
 @EnableConfigurationProperties(MatchingStoreProperties.class)

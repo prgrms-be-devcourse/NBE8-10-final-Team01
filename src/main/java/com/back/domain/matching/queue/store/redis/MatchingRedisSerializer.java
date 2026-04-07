@@ -13,11 +13,13 @@ import com.back.domain.matching.queue.model.ReadyDecision;
 import com.back.domain.matching.queue.model.WaitingUser;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 
 /**
- * matching 상태를 Redis 문자열 값으로 저장할 때 사용할 직렬화 규칙을 모은다.
+ * matching 상태를 Redis 문자열 값으로 저장할 때 사용하는 직렬화 규칙을 모은다.
  *
- * 이번 단계에서는 StringRedisTemplate + JSON 저장 방식을 기준으로 고정한다.
+ * 이 구현은 StringRedisTemplate + JSON 조합을 기준으로 유지하고,
+ * Redis 문서 비교와 Lua/CAS 전이를 위해 날짜 값도 ISO 문자열로 고정한다.
  */
 @Component
 public class MatchingRedisSerializer {
@@ -25,11 +27,12 @@ public class MatchingRedisSerializer {
     private final ObjectMapper objectMapper;
 
     public MatchingRedisSerializer(ObjectMapper objectMapper) {
-        this.objectMapper = objectMapper;
+        this.objectMapper = objectMapper.copy().findAndRegisterModules();
+        this.objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
     }
 
     /**
-     * match session 본문은 JSON 문자열 하나로 저장한다.
+     * match session 본문을 JSON 문자열 하나로 저장한다.
      */
     public String writeMatchSession(MatchSession matchSession) {
         return writeValue(MatchSessionDocument.from(matchSession), "match session");
@@ -43,7 +46,7 @@ public class MatchingRedisSerializer {
     }
 
     /**
-     * queue list와 userQueue index에는 같은 WaitingUser JSON 문자열을 저장한다.
+     * queue list 와 userQueue index 에는 같은 WaitingUser JSON 문자열을 저장한다.
      */
     public String writeWaitingUser(WaitingUser waitingUser) {
         return writeValue(WaitingUserDocument.from(waitingUser), "waiting user");
@@ -65,7 +68,7 @@ public class MatchingRedisSerializer {
     }
 
     /**
-     * queue list와 userQueue index는 같은 복원 규칙을 사용한다.
+     * queue list 와 userQueue index 는 같은 복원 규칙을 사용한다.
      */
     public WaitingUser readWaitingUser(String value) {
         WaitingUserDocument document = readValue(value, WaitingUserDocument.class, "waiting user");
@@ -94,8 +97,8 @@ public class MatchingRedisSerializer {
     }
 
     /**
-     * MatchSession 의 계산 메서드가 JSON 에 섞이지 않도록
-     * Redis 저장 전용 스냅샷 구조를 별도로 둔다.
+     * MatchSession 은 계산 메서드가 JSON 에 섞이지 않도록
+     * Redis 저장 전용 스냅샷 구조로 한 번 감싼다.
      */
     private record MatchSessionDocument(
             Long matchId,
@@ -136,7 +139,7 @@ public class MatchingRedisSerializer {
     }
 
     /**
-     * WaitingUser도 joinedAt을 유지해야 rollback과 디버깅 시점이 흐려지지 않는다.
+     * WaitingUser 는 joinedAt 도 유지해야 rollback 과 디버깅 시점이 흐려지지 않는다.
      */
     private record WaitingUserDocument(Long userId, String nickname, QueueKey queueKey, LocalDateTime joinedAt) {
 

@@ -24,7 +24,6 @@ public class QueueProblemPicker {
         if (queueKey == null) {
             throw new IllegalArgumentException("queueKey는 필수입니다.");
         }
-
         return problemPickService.pickProblemId(
                 queueKey.category(), toDifficultyLevel(queueKey.difficulty()), participantIds);
     }
