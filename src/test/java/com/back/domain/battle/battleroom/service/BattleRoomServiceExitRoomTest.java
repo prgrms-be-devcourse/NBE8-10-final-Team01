@@ -33,6 +33,7 @@ import com.back.domain.problem.problem.repository.ProblemRepository;
 import com.back.global.exception.ServiceException;
 import com.back.global.websocket.BattleCodeStore;
 import com.back.global.websocket.BattleReconnectStore;
+import com.back.global.websocket.BattleTimerStore;
 import com.back.global.websocket.pubsub.WebSocketMessagePublisher;
 
 class BattleRoomServiceExitRoomTest {
@@ -44,6 +45,7 @@ class BattleRoomServiceExitRoomTest {
     private final WebSocketMessagePublisher publisher = mock(WebSocketMessagePublisher.class);
     private final BattleCodeStore battleCodeStore = mock(BattleCodeStore.class);
     private final BattleReconnectStore reconnectStore = mock(BattleReconnectStore.class);
+    private final BattleTimerStore battleTimerStore = mock(BattleTimerStore.class);
     private final BattleResultService battleResultService = mock(BattleResultService.class);
 
     private final BattleRoomService sut = new BattleRoomService(
@@ -54,6 +56,7 @@ class BattleRoomServiceExitRoomTest {
             publisher,
             battleCodeStore,
             reconnectStore,
+            battleTimerStore,
             battleResultService);
 
     private static final Long ROOM_ID = 1L;
@@ -99,7 +102,7 @@ class BattleRoomServiceExitRoomTest {
         BattleParticipant participant = playingParticipant(room, member);
 
         BattleParticipant exitedOther = mock(BattleParticipant.class);
-        when(exitedOther.getStatus()).thenReturn(BattleParticipantStatus.EXIT);
+        when(exitedOther.getStatus()).thenReturn(BattleParticipantStatus.SOLVED);
 
         given_room_member_participant(room, member, participant, List.of(participant, exitedOther));
 

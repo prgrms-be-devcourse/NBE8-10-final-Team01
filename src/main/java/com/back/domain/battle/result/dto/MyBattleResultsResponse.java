@@ -33,8 +33,8 @@ public record MyBattleResultsResponse(List<MyBattleResultItem> battleResults, Pa
          * BattleParticipant 엔티티를 전적 응답 아이템으로 변환
          *
          * solved:
-         * - 배틀에서 정답 처리 후 complete() 되면 EXIT 상태가 되므로
-         * - EXIT 이면 solved = true 로 본다.
+         * - 배틀에서 정답 처리 후 complete() 되면 SOLVED 상태가 되므로
+         * - SOLVED 이면 solved = true 로 본다.
          */
         public static MyBattleResultItem from(BattleParticipant participant) {
             return new MyBattleResultItem(
@@ -43,7 +43,7 @@ public record MyBattleResultsResponse(List<MyBattleResultItem> battleResults, Pa
                     participant.getBattleRoom().getProblem().getTitle(),
                     participant.getFinalRank(),
                     participant.getScoreDelta(),
-                    participant.getStatus() == BattleParticipantStatus.EXIT,
+                    participant.getStatus() == BattleParticipantStatus.SOLVED,
                     participant.getFinishTime(),
                     // 배틀이 생성된 시각을 "플레이한 시각" 기준값으로 사용
                     participant.getBattleRoom().getCreatedAt());

@@ -25,6 +25,7 @@ import com.back.domain.problem.problem.repository.ProblemRepository;
 import com.back.global.exception.ServiceException;
 import com.back.global.websocket.BattleCodeStore;
 import com.back.global.websocket.BattleReconnectStore;
+import com.back.global.websocket.BattleTimerStore;
 import com.back.global.websocket.pubsub.WebSocketMessagePublisher;
 
 class BattleRoomServiceGetRoomStateTest {
@@ -41,6 +42,7 @@ class BattleRoomServiceGetRoomStateTest {
             mock(WebSocketMessagePublisher.class),
             battleCodeStore,
             mock(BattleReconnectStore.class),
+            mock(BattleTimerStore.class),
             mock(BattleResultService.class));
 
     private static final Long ROOM_ID = 1L;

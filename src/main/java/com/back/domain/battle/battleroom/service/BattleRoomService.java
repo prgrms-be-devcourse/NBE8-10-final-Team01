@@ -29,8 +29,10 @@ import com.back.domain.problem.problem.repository.ProblemRepository;
 import com.back.global.exception.ServiceException;
 import com.back.global.websocket.BattleCodeStore;
 import com.back.global.websocket.BattleReconnectStore;
+import com.back.global.websocket.BattleTimerStore;
 import com.back.global.websocket.pubsub.WebSocketMessagePublisher;
 
+import jakarta.persistence.OptimisticLockException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -46,6 +48,7 @@ public class BattleRoomService {
     private final WebSocketMessagePublisher publisher;
     private final BattleCodeStore battleCodeStore;
     private final BattleReconnectStore reconnectStore;
+    private final BattleTimerStore battleTimerStore;
     private final BattleResultService battleResultService;
 
     @Transactional
@@ -134,6 +137,11 @@ public class BattleRoomService {
                         } catch (Exception e) {
                             log.error("BATTLE_STARTED WebSocket 전송 실패 roomId={}", roomId, e);
                         }
+                        try {
+                            battleTimerStore.schedule(roomId);
+                        } catch (Exception e) {
+                            log.error("배틀 타이머 예약 실패 roomId={} - 스케줄러 안전망이 복구 예정", roomId, e);
+                        }
                     }
                 });
             }
@@ -197,7 +205,10 @@ public class BattleRoomService {
                 }
                 if (noActiveLeft) {
                     try {
+                        battleTimerStore.cancel(roomId);
                         battleResultService.settle(roomId);
+                    } catch (OptimisticLockException e) {
+                        log.info("settle 낙관적 락 충돌 - 이미 정산 완료됨 roomId={}", roomId);
                     } catch (Exception e) {
                         log.error("즉시 정산 실패 roomId={}", roomId, e);
                     }

@@ -1,5 +1,6 @@
 package com.back.global.websocket;
 
+import java.util.HashMap;
 import java.util.Map;
 
 import org.springframework.messaging.handler.annotation.DestinationVariable;
@@ -13,7 +14,9 @@ import com.back.global.websocket.dto.CodeUpdateMessage;
 import com.back.global.websocket.pubsub.WebSocketMessagePublisher;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @Controller
 @RequiredArgsConstructor
 public class BattleWebSocketHandler {
@@ -34,9 +37,28 @@ public class BattleWebSocketHandler {
             CodeUpdateMessage message,
             @AuthenticationPrincipal SecurityUser securityUser) {
 
-        publisher.publish(
-                "/topic/room/" + roomId + "/spectate",
-                Map.of("type", "CODE_UPDATE", "userId", securityUser.getId(), "code", message.code()));
+        if (securityUser == null) {
+            log.warn("handleCodeUpdate - securityUser is null roomId={}", roomId);
+            return;
+        }
+        if (securityUser.getId() == null) {
+            log.warn("handleCodeUpdate - securityUser.getId() is null roomId={}", roomId);
+            return;
+        }
+        if (message == null) {
+            log.warn("handleCodeUpdate - message is null roomId={}", roomId);
+            return;
+        }
+        if (message.code() == null) {
+            log.warn("handleCodeUpdate - message.code() is null roomId={} memberId={}", roomId, securityUser.getId());
+            return;
+        }
+
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("type", "CODE_UPDATE");
+        payload.put("userId", securityUser.getId());
+        payload.put("code", message.code());
+        publisher.publish("/topic/room/" + roomId + "/spectate", payload);
 
         // 재입장 및 관전자 동기화를 위해 Redis에 임시 저장
         battleCodeStore.save(roomId, securityUser.getId(), message.code());
@@ -52,10 +74,21 @@ public class BattleWebSocketHandler {
     @MessageMapping("/room/{roomId}/code/sync")
     public void handleSyncRequest(@DestinationVariable Long roomId, CodeSyncRequest request) {
 
+        if (request == null) {
+            log.warn("handleSyncRequest - request is null roomId={}", roomId);
+            return;
+        }
+        if (request.targetUserId() == null) {
+            log.warn("handleSyncRequest - targetUserId is null roomId={}", roomId);
+            return;
+        }
+
         String code = battleCodeStore.get(roomId, request.targetUserId());
 
-        publisher.publish(
-                "/topic/room/" + roomId + "/spectate",
-                Map.of("type", "CODE_SYNC", "userId", request.targetUserId(), "code", code));
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("type", "CODE_SYNC");
+        payload.put("userId", request.targetUserId());
+        payload.put("code", code);
+        publisher.publish("/topic/room/" + roomId + "/spectate", payload);
     }
 }

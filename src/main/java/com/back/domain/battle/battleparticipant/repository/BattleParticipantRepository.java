@@ -110,6 +110,28 @@ public interface BattleParticipantRepository extends JpaRepository<BattlePartici
             """)
     Optional<BattleParticipant> findActiveParticipantByMemberId(@Param("memberId") Long memberId);
 
+    /**
+     * 미확인 배틀 결과 조회 (가장 최근 것 1건)
+     * settle() 후 isResultChecked=false로 설정되고, 유저가 결과를 확인하면 true로 전환된다.
+     */
+    @Query("""
+            select bp from BattleParticipant bp
+            join fetch bp.battleRoom br
+            join fetch br.problem p
+            where bp.member.id = :memberId
+              and bp.isResultChecked = false
+              and br.status = com.back.domain.battle.battleroom.entity.BattleRoomStatus.FINISHED
+            order by br.createdAt desc
+            """)
+    List<BattleParticipant> findUncheckedResultsByMemberId(@Param("memberId") Long memberId, Pageable pageable);
+
+    /**
+     * roomId + memberId로 참여자 조회 (Member 엔티티 로드 없이 FK만으로 조회)
+     */
+    @Query("select bp from BattleParticipant bp where bp.battleRoom.id = :roomId and bp.member.id = :memberId")
+    Optional<BattleParticipant> findByBattleRoomIdAndMemberId(
+            @Param("roomId") Long roomId, @Param("memberId") Long memberId);
+
     @Query("""
             select bp.finalRank
             from BattleParticipant bp

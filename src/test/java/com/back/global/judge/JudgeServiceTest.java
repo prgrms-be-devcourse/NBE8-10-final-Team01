@@ -32,6 +32,7 @@ import com.back.domain.problem.testcase.entity.TestCase;
 import com.back.global.judge.dto.Judge0SubmitResponse;
 import com.back.global.judge.dto.Judge0SubmitResponse.Status;
 import com.back.global.judge.event.JudgeRequestedEvent;
+import com.back.global.websocket.BattleTimerStore;
 import com.back.global.websocket.pubsub.WebSocketMessagePublisher;
 
 class JudgeServiceTest {
@@ -42,6 +43,7 @@ class JudgeServiceTest {
     private final BattleRoomRepository battleRoomRepository = mock(BattleRoomRepository.class);
     private final MemberRepository memberRepository = mock(MemberRepository.class);
     private final BattleResultService battleResultService = mock(BattleResultService.class);
+    private final BattleTimerStore battleTimerStore = mock(BattleTimerStore.class);
     private final WebSocketMessagePublisher publisher = mock(WebSocketMessagePublisher.class);
 
     private final JudgeService judgeService = new JudgeService(
@@ -51,6 +53,7 @@ class JudgeServiceTest {
             battleRoomRepository,
             memberRepository,
             battleResultService,
+            battleTimerStore,
             publisher);
 
     private static final Long SUBMISSION_ID = 1L;
@@ -112,7 +115,7 @@ class JudgeServiceTest {
         stubJudge0(response(3, "3\n"));
 
         BattleParticipant exitParticipant = mock(BattleParticipant.class);
-        when(exitParticipant.getStatus()).thenReturn(BattleParticipantStatus.EXIT);
+        when(exitParticipant.getStatus()).thenReturn(BattleParticipantStatus.SOLVED);
         stubHandleAc(List.of(exitParticipant));
 
         judgeService.onJudgeRequested(event(List.of(tc)));
@@ -202,7 +205,7 @@ class JudgeServiceTest {
         stubJudge0(response(3, "3\n"));
 
         BattleParticipant exitParticipant = mock(BattleParticipant.class);
-        when(exitParticipant.getStatus()).thenReturn(BattleParticipantStatus.EXIT);
+        when(exitParticipant.getStatus()).thenReturn(BattleParticipantStatus.SOLVED);
         stubHandleAc(List.of(exitParticipant));
 
         judgeService.onJudgeRequested(event(List.of(tc)));
@@ -231,8 +234,8 @@ class JudgeServiceTest {
 
         BattleParticipant p1 = mock(BattleParticipant.class);
         BattleParticipant p2 = mock(BattleParticipant.class);
-        when(p1.getStatus()).thenReturn(BattleParticipantStatus.EXIT);
-        when(p2.getStatus()).thenReturn(BattleParticipantStatus.EXIT);
+        when(p1.getStatus()).thenReturn(BattleParticipantStatus.SOLVED);
+        when(p2.getStatus()).thenReturn(BattleParticipantStatus.SOLVED);
         stubHandleAc(List.of(p1, p2));
 
         judgeService.onJudgeRequested(event(List.of(tc)));
@@ -248,7 +251,7 @@ class JudgeServiceTest {
 
         BattleParticipant p1 = mock(BattleParticipant.class);
         BattleParticipant p2 = mock(BattleParticipant.class);
-        when(p1.getStatus()).thenReturn(BattleParticipantStatus.EXIT);
+        when(p1.getStatus()).thenReturn(BattleParticipantStatus.SOLVED);
         when(p2.getStatus()).thenReturn(BattleParticipantStatus.PLAYING);
         stubHandleAc(List.of(p1, p2));
 
