@@ -7,8 +7,8 @@ import com.back.domain.matching.queue.model.QueueKey;
 /**
  * matching Redis key 규칙을 한 곳에 모아 둔다.
  *
- * 이후 하위 이슈에서 Redis 저장소 구현이 늘어나더라도
- * key 네이밍 규칙은 이 유틸만 기준으로 사용한다.
+ * 이후 하위 이슈에서 Redis 저장소 구현이 더 확장되더라도
+ * key 조합 규칙은 이 유틸만 기준으로 사용한다.
  */
 public final class MatchingRedisKeys {
 
@@ -41,17 +41,38 @@ public final class MatchingRedisKeys {
     }
 
     /**
-     * user -> match 연결도 사용자별 단일 key 로 고정한다.
+     * user -> match 연결은 사용자별 단일 key 로 고정한다.
      */
     public static String userMatch(Long userId) {
         return USER_MATCH_PREFIX + ":" + requireId(userId, "userId");
     }
 
     /**
-     * match session 본문은 matchId 로 조회한다.
+     * ready-check session 본문은 matchId 로 조회한다.
      */
     public static String match(Long matchId) {
         return MATCH_PREFIX + ":" + requireId(matchId, "matchId");
+    }
+
+    /**
+     * ready-check session key 를 훑을 때 사용하는 임시 패턴이다.
+     */
+    public static String matchPattern() {
+        return MATCH_PREFIX + ":*";
+    }
+
+    /**
+     * user:match 인덱스 전체를 훑을 때 사용하는 패턴이다.
+     */
+    public static String userMatchPattern() {
+        return USER_MATCH_PREFIX + ":*";
+    }
+
+    /**
+     * match session key prefix 를 외부 helper 에서 재사용할 수 있게 노출한다.
+     */
+    public static String matchPrefix() {
+        return MATCH_PREFIX + ":";
     }
 
     /**
@@ -62,7 +83,7 @@ public final class MatchingRedisKeys {
     }
 
     /**
-     * match sequence 도 단일 증가 key 로 유지한다.
+     * match sequence 는 단일 증가 key 로 유지한다.
      */
     public static String matchSequence() {
         return MATCH_SEQUENCE_KEY;

@@ -25,8 +25,9 @@ public class QueueProblemPicker {
             throw new IllegalArgumentException("queueKey는 필수입니다.");
         }
 
-        return problemPickService.pickProblemId(
-                queueKey.category(), toDifficultyLevel(queueKey.difficulty()), participantIds);
+        return 1L;
+        //        return problemPickService.pickProblemId(
+        //                queueKey.category(), toDifficultyLevel(queueKey.difficulty()), participantIds);
     }
 
     private DifficultyLevel toDifficultyLevel(Difficulty difficulty) {

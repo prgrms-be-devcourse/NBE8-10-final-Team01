@@ -5,8 +5,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 /**
  * matching 상태 저장소 선택 설정을 묶는다.
  *
- * 이번 단계에서는 설정 구조만 먼저 도입하고,
- * 실제 구현체 전환은 다음 하위 이슈에서 연결한다.
+ * 기본값은 기존 InMemory 저장소를 유지하고,
+ * dev 등 필요한 환경에서 Redis 저장소로 전환할 수 있게 한다.
  */
 @ConfigurationProperties(prefix = "matching.store")
 public class MatchingStoreProperties {

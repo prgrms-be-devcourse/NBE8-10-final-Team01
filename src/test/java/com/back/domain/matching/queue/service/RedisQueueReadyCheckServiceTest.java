@@ -3,19 +3,30 @@ package com.back.domain.matching.queue.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import com.back.domain.battle.battleroom.dto.CreateRoomRequest;
+import com.back.domain.battle.battleroom.dto.CreateRoomResponse;
 import com.back.domain.battle.battleroom.service.BattleRoomService;
 import com.back.domain.matching.queue.adapter.QueueProblemPicker;
 import com.back.domain.matching.queue.dto.MatchStateV2Response;
@@ -26,7 +37,6 @@ import com.back.domain.matching.queue.dto.QueueStatusResponse;
 import com.back.domain.matching.queue.model.Difficulty;
 import com.back.domain.matching.queue.model.QueueKey;
 import com.back.domain.matching.queue.model.WaitingUser;
-import com.back.domain.matching.queue.store.InMemoryMatchStateStore;
 import com.back.domain.matching.queue.store.MatchingStoreProperties;
 import com.back.domain.matching.queue.store.redis.FakeStringRedisTemplate;
 import com.back.domain.matching.queue.store.redis.MatchingRedisSerializer;
@@ -42,22 +52,21 @@ class RedisQueueReadyCheckServiceTest {
     private FakeStringRedisTemplate redisTemplate;
     private MatchingRedisSerializer serializer;
     private ReadyCheckService readyCheckService;
+    private RedisMatchStateStore store;
 
     @BeforeEach
     void setUp() {
         redisTemplate = new FakeStringRedisTemplate();
         serializer = new MatchingRedisSerializer(
                 JsonMapper.builder().findAndAddModules().build());
-        readyCheckService = new ReadyCheckService(
-                battleRoomService,
-                queueProblemPicker,
-                new RedisMatchStateStore(
-                        redisTemplate, serializer, matchingStoreProperties(), new InMemoryMatchStateStore()),
-                matchingEventPublisher);
+        store = new RedisMatchStateStore(redisTemplate, serializer, matchingStoreProperties());
+        readyCheckService = new ReadyCheckService(battleRoomService, queueProblemPicker, store, matchingEventPublisher);
+
+        when(queueProblemPicker.pick(any(QueueKey.class), anyList())).thenReturn(1L);
     }
 
     @Test
-    @DisplayName("Redis queue 경로에서도 queue/me 는 SEARCHING 동안 waitingCount와 requiredCount를 반환한다")
+    @DisplayName("Redis queue 경로에서는 queue/me 가 SEARCHING 동안 waitingCount 와 requiredCount 를 반환한다")
     void getMyQueueStateV2_returnsSearchingInfo() {
         QueueStatusResponse response = joinUser(1L);
 
@@ -73,7 +82,7 @@ class RedisQueueReadyCheckServiceTest {
     }
 
     @Test
-    @DisplayName("Redis queue 경로에서도 cancel 후 감소한 waitingCount를 queue topic 이벤트로 발행한다")
+    @DisplayName("Redis queue 경로에서는 cancel 시 감소한 waitingCount 를 queue topic 이벤트로 발행한다")
     void cancelQueueV2_publishesQueueStateChanged() {
         joinUser(1L);
         joinUser(2L);
@@ -86,7 +95,29 @@ class RedisQueueReadyCheckServiceTest {
     }
 
     @Test
-    @DisplayName("Redis queue 경로에서도 4번째 join 시 matched 4명에게 READY_CHECK_STARTED를 발행한다")
+    @DisplayName("4번째 join 이후 matches/me 는 Redis ready-check 세션을 읽어 ACCEPT_PENDING 을 반환한다")
+    void getMyMatchStateV2_returnsAcceptPending_whenFourthUserJoins() {
+        joinUser(1L);
+        joinUser(2L);
+        joinUser(3L);
+        QueueStatusResponse fourthResponse = joinUser(4L);
+
+        MatchStateV2Response response = readyCheckService.getMyMatchStateV2(1L);
+
+        assertThat(fourthResponse.getWaitingCount()).isEqualTo(0);
+        assertThat(readyCheckService.getMyQueueStateV2(1L).inQueue()).isFalse();
+        assertThat(response.status()).isEqualTo(MatchStatus.ACCEPT_PENDING);
+        assertThat(response.room()).isNull();
+        assertThat(response.readyCheck()).isNotNull();
+        assertThat(response.readyCheck().acceptedCount()).isEqualTo(0);
+        assertThat(response.readyCheck().requiredCount()).isEqualTo(4);
+        assertThat(response.readyCheck().participants())
+                .extracting(participant -> participant.nickname())
+                .containsExactly("m1", "m2", "m3", "m4");
+    }
+
+    @Test
+    @DisplayName("4번째 join 시 matched 4명에게 READY_CHECK_STARTED 를 발행한다")
     void joinQueueV2_publishesReadyCheckStarted_whenFourthUserJoins() {
         joinUser(1L);
         joinUser(2L);
@@ -94,12 +125,8 @@ class RedisQueueReadyCheckServiceTest {
 
         readyCheckService.joinQueueV2(4L, "m4", createRequest("Array", Difficulty.EASY));
 
-        MatchStateV2Response matchState = readyCheckService.getMyMatchStateV2(1L);
         ArgumentCaptor<Long> userIdCaptor = ArgumentCaptor.forClass(Long.class);
         ArgumentCaptor<MatchStateV2Response> responseCaptor = ArgumentCaptor.forClass(MatchStateV2Response.class);
-
-        assertThat(readyCheckService.getMyQueueStateV2(1L).inQueue()).isFalse();
-        assertThat(matchState.status()).isEqualTo(MatchStatus.ACCEPT_PENDING);
 
         verify(matchingEventPublisher, times(4))
                 .publishReadyCheckStarted(userIdCaptor.capture(), responseCaptor.capture());
@@ -114,7 +141,151 @@ class RedisQueueReadyCheckServiceTest {
     }
 
     @Test
-    @DisplayName("Redis queue 경로에서도 ready-check 세션 생성 실패 시 rollback 후 queue waitingCount 복구 이벤트를 발행한다")
+    @DisplayName("일반 accept 는 matched 4명에게 READY_DECISION_CHANGED 를 발행한다")
+    void acceptMatch_publishesReadyDecisionChanged() {
+        Long matchId = createAcceptPendingMatch();
+        clearInvocations(matchingEventPublisher);
+
+        MatchStateV2Response response = readyCheckService.acceptMatch(1L, matchId);
+
+        assertThat(response.status()).isEqualTo(MatchStatus.ACCEPT_PENDING);
+        assertThat(response.readyCheck().acceptedCount()).isEqualTo(1);
+        assertThat(response.readyCheck().acceptedByMe()).isTrue();
+        verify(matchingEventPublisher, times(4)).publishReadyDecisionChanged(any(), any());
+    }
+
+    @Test
+    @DisplayName("백엔드 재시작 후에도 Redis ready-check 세션은 matches/me 로 복구된다")
+    void getMyMatchStateV2_recoversFromRedisAfterRestart() {
+        Long matchId = createAcceptPendingMatch();
+        ReadyCheckService restartedService = new ReadyCheckService(
+                battleRoomService,
+                queueProblemPicker,
+                new RedisMatchStateStore(redisTemplate, serializer, matchingStoreProperties()),
+                matchingEventPublisher);
+
+        MatchStateV2Response response = restartedService.getMyMatchStateV2(1L);
+
+        assertThat(response.status()).isEqualTo(MatchStatus.ACCEPT_PENDING);
+        assertThat(response.readyCheck().matchId()).isEqualTo(matchId);
+    }
+
+    @Test
+    @DisplayName("전원 수락이 완료되면 ROOM_READY 와 roomId 를 반환한다")
+    void acceptMatch_returnsRoomReady_whenAllUsersAccepted() {
+        when(battleRoomService.createRoom(any(CreateRoomRequest.class)))
+                .thenReturn(new CreateRoomResponse(100L, "WAITING"));
+
+        joinUser(1L);
+        joinUser(2L);
+        joinUser(3L);
+        joinUser(4L);
+
+        Long matchId = readyCheckService.getMyMatchStateV2(1L).readyCheck().matchId();
+
+        readyCheckService.acceptMatch(1L, matchId);
+        readyCheckService.acceptMatch(2L, matchId);
+        readyCheckService.acceptMatch(3L, matchId);
+        clearInvocations(matchingEventPublisher);
+        MatchStateV2Response response = readyCheckService.acceptMatch(4L, matchId);
+
+        assertThat(response.status()).isEqualTo(MatchStatus.ROOM_READY);
+        assertThat(response.room()).isNotNull();
+        assertThat(response.room().roomId()).isEqualTo(100L);
+        assertThat(response.readyCheck().acceptedCount()).isEqualTo(4);
+        verify(battleRoomService, times(1)).createRoom(any(CreateRoomRequest.class));
+        verify(matchingEventPublisher, times(4)).publishRoomReady(any(), any());
+    }
+
+    @Test
+    @DisplayName("한 명이라도 거절하면 세션 전체가 CANCELLED 로 종료된다")
+    void declineMatch_returnsCancelled() {
+        joinUser(1L);
+        joinUser(2L);
+        joinUser(3L);
+        joinUser(4L);
+
+        Long matchId = readyCheckService.getMyMatchStateV2(1L).readyCheck().matchId();
+        clearInvocations(matchingEventPublisher);
+
+        MatchStateV2Response response = readyCheckService.declineMatch(2L, matchId);
+
+        assertThat(response.status()).isEqualTo(MatchStatus.CANCELLED);
+        assertThat(response.message()).isNotNull();
+        assertThat(readyCheckService.getMyMatchStateV2(1L).status()).isEqualTo(MatchStatus.IDLE);
+        verify(matchingEventPublisher, times(4)).publishMatchCancelled(any(), any());
+    }
+
+    @Test
+    @DisplayName("만료 스케줄러는 Redis ready-check 세션을 찾아 MATCH_EXPIRED 를 발행하고 즉시 정리한다")
+    void expireTimedOutMatches_publishesExpiredAndClearsSession() {
+        QueueKey queueKey = new QueueKey("Array", Difficulty.EASY);
+        List<WaitingUser> users = List.of(
+                new WaitingUser(1L, "m1", queueKey),
+                new WaitingUser(2L, "m2", queueKey),
+                new WaitingUser(3L, "m3", queueKey),
+                new WaitingUser(4L, "m4", queueKey));
+
+        store.markAcceptPending(queueKey, users, LocalDateTime.now().minusSeconds(1));
+        clearInvocations(matchingEventPublisher);
+
+        readyCheckService.expireTimedOutMatches();
+
+        assertThat(readyCheckService.getMyMatchStateV2(1L).status()).isEqualTo(MatchStatus.IDLE);
+        verify(matchingEventPublisher, times(4)).publishMatchExpired(any(), any());
+    }
+
+    @Test
+    @DisplayName("마지막 accept 경쟁에서도 room 은 한 번만 생성된다")
+    void acceptMatch_createsRoomOnlyOnce_whenLastAcceptsRace() throws Exception {
+        AtomicInteger createRoomCallCount = new AtomicInteger();
+        when(battleRoomService.createRoom(any(CreateRoomRequest.class))).thenAnswer(invocation -> {
+            createRoomCallCount.incrementAndGet();
+            Thread.sleep(200);
+            return new CreateRoomResponse(100L, "WAITING");
+        });
+
+        joinUser(1L);
+        joinUser(2L);
+        joinUser(3L);
+        joinUser(4L);
+
+        Long matchId = readyCheckService.getMyMatchStateV2(1L).readyCheck().matchId();
+
+        readyCheckService.acceptMatch(1L, matchId);
+        readyCheckService.acceptMatch(2L, matchId);
+
+        CountDownLatch startLatch = new CountDownLatch(1);
+        ExecutorService executorService = Executors.newFixedThreadPool(2);
+
+        try {
+            Future<MatchStateV2Response> user3Future = executorService.submit(() -> {
+                startLatch.await();
+                return readyCheckService.acceptMatch(3L, matchId);
+            });
+            Future<MatchStateV2Response> user4Future = executorService.submit(() -> {
+                startLatch.await();
+                return readyCheckService.acceptMatch(4L, matchId);
+            });
+
+            startLatch.countDown();
+
+            MatchStateV2Response user3Response = user3Future.get(5, TimeUnit.SECONDS);
+            MatchStateV2Response user4Response = user4Future.get(5, TimeUnit.SECONDS);
+            MatchStateV2Response finalState = readyCheckService.getMyMatchStateV2(1L);
+
+            assertThat(createRoomCallCount.get()).isEqualTo(1);
+            assertThat(user3Response.status()).isIn(MatchStatus.ACCEPT_PENDING, MatchStatus.ROOM_READY);
+            assertThat(user4Response.status()).isIn(MatchStatus.ACCEPT_PENDING, MatchStatus.ROOM_READY);
+            assertThat(finalState.status()).isEqualTo(MatchStatus.ROOM_READY);
+            assertThat(finalState.room()).isNotNull();
+        } finally {
+            executorService.shutdownNow();
+        }
+    }
+
+    @Test
+    @DisplayName("ready-check 세션 생성 실패 시 rollback 후 queue waitingCount 복구 이벤트를 발행한다")
     void joinQueueV2_publishesRecoveredQueueEvent_whenMarkAcceptPendingFails() {
         ExplodingRedisMatchStateStore failingStore =
                 new ExplodingRedisMatchStateStore(redisTemplate, serializer, matchingStoreProperties());
@@ -141,6 +312,14 @@ class RedisQueueReadyCheckServiceTest {
         return properties;
     }
 
+    private Long createAcceptPendingMatch() {
+        joinUser(1L);
+        joinUser(2L);
+        joinUser(3L);
+        joinUser(4L);
+        return readyCheckService.getMyMatchStateV2(1L).readyCheck().matchId();
+    }
+
     private QueueJoinRequest createRequest(String category, Difficulty difficulty) {
         return new QueueJoinRequest(category, difficulty);
     }
@@ -155,7 +334,7 @@ class RedisQueueReadyCheckServiceTest {
                 FakeStringRedisTemplate redisTemplate,
                 MatchingRedisSerializer serializer,
                 MatchingStoreProperties properties) {
-            super(redisTemplate, serializer, properties, new InMemoryMatchStateStore());
+            super(redisTemplate, serializer, properties);
         }
 
         @Override
