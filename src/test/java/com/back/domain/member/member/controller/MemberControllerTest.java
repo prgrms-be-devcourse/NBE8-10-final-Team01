@@ -121,6 +121,35 @@ class MemberControllerTest extends IntegrationTestBase {
                 .andExpect(jsonPath("$.data.tier").value("UNRANKED"))
                 .andExpect(jsonPath("$.data.role").value("USER"));
     }
+
+    @Test
+    @DisplayName("레이팅 진행도 조회 요청 시 현재/다음 티어 조건을 반환한다")
+    void getMyRatingProgress_success() throws Exception {
+        String loginBody = """
+                {
+                    "email": "%s",
+                    "password": "%s"
+                }
+                """.formatted(LOGIN_TEST_EMAIL, LOGIN_TEST_PASSWORD);
+
+        MvcResult loginResult = mockMvc.perform(post("/api/v1/members/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(loginBody))
+                .andReturn();
+
+        String cookieHeader = loginResult.getResponse().getHeader("Set-Cookie");
+        String token = cookieHeader.split("accessToken=")[1].split(";")[0];
+
+        mockMvc.perform(get("/api/v1/members/me/rating-progress").cookie(new MockCookie("accessToken", token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.resultCode").value("200"))
+                .andExpect(jsonPath("$.msg").value("내 레이팅 진행도 조회 성공"))
+                .andExpect(jsonPath("$.data.current.displayTier").value("UNRANKED"))
+                .andExpect(jsonPath("$.data.current.tier").value("BRONZE_5"))
+                .andExpect(jsonPath("$.data.next.tier").value("BRONZE_5"))
+                .andExpect(jsonPath("$.data.next.eligibleNow").value(false))
+                .andExpect(jsonPath("$.data.next.requirements[0].key").value("rankedActivity"));
+    }
     // ============ 로그인 ============
     @Test
     @DisplayName("정상적인 로그인 요청 시 200 응답과 accessToken 쿠키를 반환한다")

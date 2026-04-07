@@ -8,7 +8,9 @@ import com.back.domain.member.member.dto.JoinRequest;
 import com.back.domain.member.member.dto.LoginRequest;
 import com.back.domain.member.member.dto.LoginTokens;
 import com.back.domain.member.member.dto.MyInfoResponse;
+import com.back.domain.member.member.dto.RatingProgressResponse;
 import com.back.domain.member.member.entity.Member;
+import com.back.domain.member.member.service.MemberRatingProgressService;
 import com.back.domain.member.member.service.MemberService;
 import com.back.global.exception.ServiceException;
 import com.back.global.jwt.RefreshTokenService;
@@ -23,6 +25,7 @@ import lombok.RequiredArgsConstructor;
 @RequestMapping("api/v1/members")
 public class MemberController {
     private final MemberService memberService;
+    private final MemberRatingProgressService memberRatingProgressService;
     private final BattleResultService battleResultService;
     private final RefreshTokenService refreshTokenService;
     private final Rq rq;
@@ -91,5 +94,15 @@ public class MemberController {
         }
 
         return memberService.getMyInfo(actor.getId());
+    }
+
+    @GetMapping("/me/rating-progress")
+    public RsData<RatingProgressResponse> getMyRatingProgress() {
+        Member actor = rq.getActor();
+        if (actor == null || actor.getId() == null) {
+            throw new ServiceException("MEMBER_401", "로그인이 필요합니다");
+        }
+
+        return memberRatingProgressService.getMyRatingProgress(actor.getId());
     }
 }
