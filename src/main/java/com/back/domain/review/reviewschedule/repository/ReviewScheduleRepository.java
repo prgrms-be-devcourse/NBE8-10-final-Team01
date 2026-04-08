@@ -16,6 +16,8 @@ public interface ReviewScheduleRepository extends JpaRepository<ReviewSchedule, 
 
     Optional<ReviewSchedule> findByMemberAndProblem(Member member, Problem problem);
 
+    Optional<ReviewSchedule> findByMemberIdAndProblemId(Long memberId, Long problemId);
+
     @Query("SELECT rs FROM ReviewSchedule rs JOIN FETCH rs.problem "
             + "WHERE rs.member.id = :memberId "
             + "AND rs.isReviewRequired = true "

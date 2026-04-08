@@ -54,4 +54,8 @@ public class ReviewSchedule extends BaseEntity {
         this.reviewCount = this.reviewCount + 1;
         this.isReviewRequired = isReviewRequired;
     }
+
+    public void dismiss() {
+        this.isReviewRequired = false;
+    }
 }

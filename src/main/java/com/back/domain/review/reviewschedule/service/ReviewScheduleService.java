@@ -2,8 +2,10 @@ package com.back.domain.review.reviewschedule.service;
 
 import java.time.LocalDateTime;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 
@@ -29,6 +31,13 @@ public class ReviewScheduleService {
                 .map(TodayReviewResponse.ReviewItem::from)
                 .toList();
         return new TodayReviewResponse(items);
+    }
+
+    @Transactional
+    public void dismissReview(Long problemId, Long memberId) {
+        ReviewSchedule schedule = reviewScheduleRepository.findByMemberIdAndProblemId(memberId, problemId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "복습 스케줄을 찾을 수 없습니다."));
+        schedule.dismiss();
     }
 
     /**

@@ -1,6 +1,7 @@
 package com.back.domain.review.reviewschedule.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -68,5 +69,29 @@ class ReviewScheduleControllerTest {
 
         assertThat(result.resultCode()).isEqualTo("200");
         assertThat(result.data().reviews()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("비로그인 상태에서 dismiss 요청하면 401을 반환한다")
+    void dismissReview_unauthenticated_returns401() {
+        when(rq.getActor()).thenReturn(null);
+
+        RsData<Void> result = controller.dismissReview(10L);
+
+        assertThat(result.resultCode()).isEqualTo("401");
+        verify(reviewScheduleService, never()).dismissReview(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyLong());
+    }
+
+    @Test
+    @DisplayName("로그인 상태에서 dismiss 요청하면 서비스를 호출하고 200을 반환한다")
+    void dismissReview_authenticated_returns200() {
+        Member actor = Member.of(1L, "test@test.com", "tester");
+        when(rq.getActor()).thenReturn(actor);
+        doNothing().when(reviewScheduleService).dismissReview(10L, 1L);
+
+        RsData<Void> result = controller.dismissReview(10L);
+
+        assertThat(result.resultCode()).isEqualTo("200");
+        verify(reviewScheduleService).dismissReview(10L, 1L);
     }
 }
