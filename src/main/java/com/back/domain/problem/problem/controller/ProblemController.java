@@ -27,7 +27,8 @@ public class ProblemController {
     }
 
     @GetMapping("/{problemId}")
-    public ProblemDetailResponse getProblem(@PathVariable("problemId") Long problemId) {
-        return problemService.getProblem(problemId);
+    public ProblemDetailResponse getProblem(
+            @PathVariable("problemId") Long problemId, @RequestParam(value = "lang", required = false) String lang) {
+        return problemService.getProblem(problemId, lang);
     }
 }
