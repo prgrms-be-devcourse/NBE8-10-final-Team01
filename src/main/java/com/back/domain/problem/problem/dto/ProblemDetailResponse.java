@@ -40,23 +40,13 @@ public record ProblemDetailResponse(
             List<SampleCase> sampleCases) {
         return new ProblemDetailResponse(
                 problem.getId(),
-                getTranslatedOrOriginal(
-                        translation != null ? translation.getTitle() : null,
-                        problem.getTitle()
-                ),
+                getTranslatedOrOriginal(translation != null ? translation.getTitle() : null, problem.getTitle()),
                 problem.getDifficulty().name(),
+                getTranslatedOrOriginal(translation != null ? translation.getContent() : null, problem.getContent()),
                 getTranslatedOrOriginal(
-                        translation != null ? translation.getContent() : null,
-                        problem.getContent()
-                ),
+                        translation != null ? translation.getInputFormat() : null, problem.getInputFormat()),
                 getTranslatedOrOriginal(
-                        translation != null ? translation.getInputFormat() : null,
-                        problem.getInputFormat()
-                ),
-                getTranslatedOrOriginal(
-                        translation != null ? translation.getOutputFormat() : null,
-                        problem.getOutputFormat()
-                ),
+                        translation != null ? translation.getOutputFormat() : null, problem.getOutputFormat()),
                 problem.getTimeLimitMs(),
                 problem.getMemoryLimitMb(),
                 language,

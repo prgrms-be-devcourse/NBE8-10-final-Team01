@@ -4,6 +4,7 @@ import java.time.OffsetDateTime;
 
 import com.back.domain.problem.problem.entity.Problem;
 import com.back.global.jpa.entity.BaseEntity;
+
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -12,10 +13,7 @@ import lombok.NoArgsConstructor;
 @Entity
 @Table(
         name = "problem_translations",
-        uniqueConstraints = {
-                @UniqueConstraint(columnNames = {"problem_id", "language_code"})
-        }
-)
+        uniqueConstraints = {@UniqueConstraint(columnNames = {"problem_id", "language_code"})})
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class ProblemTranslation extends BaseEntity {

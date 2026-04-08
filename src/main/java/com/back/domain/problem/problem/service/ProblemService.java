@@ -2,8 +2,6 @@ package com.back.domain.problem.problem.service;
 
 import java.util.List;
 
-import com.back.domain.problem.translation.entity.ProblemTranslation;
-import com.back.domain.problem.translation.repository.ProblemTranslationRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -17,6 +15,8 @@ import com.back.domain.problem.problem.dto.ProblemListResponse;
 import com.back.domain.problem.problem.entity.Problem;
 import com.back.domain.problem.problem.repository.ProblemRepository;
 import com.back.domain.problem.testcase.entity.TestCase;
+import com.back.domain.problem.translation.entity.ProblemTranslation;
+import com.back.domain.problem.translation.repository.ProblemTranslationRepository;
 import com.back.global.exception.ServiceException;
 
 import lombok.RequiredArgsConstructor;
@@ -85,14 +85,7 @@ public class ProblemService {
         String responseLanguage = resolveResponseLanguage(lang, translation);
 
         return ProblemDetailResponse.from(
-                problem,
-                translation,
-                responseLanguage,
-                supportedLanguages,
-                defaultLanguage,
-                starterCodes,
-                sampleCases
-        );
+                problem, translation, responseLanguage, supportedLanguages, defaultLanguage, starterCodes, sampleCases);
     }
 
     private ProblemTranslation findTranslationIfNeeded(Long problemId, String lang) {

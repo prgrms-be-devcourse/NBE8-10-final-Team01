@@ -56,8 +56,7 @@ class ProblemControllerTest {
                 List.of(
                         new ProblemDetailResponse.StarterCode("python3", "print('hello')"),
                         new ProblemDetailResponse.StarterCode("java", "class Main {}")),
-                List.of(new ProblemDetailResponse.SampleCase("1 2", "3"))
-        );
+                List.of(new ProblemDetailResponse.SampleCase("1 2", "3")));
 
         when(problemService.getProblem(1L, "ko")).thenReturn(response);
 
@@ -87,10 +86,8 @@ class ProblemControllerTest {
                 "python3",
                 List.of(
                         new ProblemDetailResponse.StarterCode("python3", "print('hello')"),
-                        new ProblemDetailResponse.StarterCode("java", "class Main {}")
-                ),
-                List.of(new ProblemDetailResponse.SampleCase("1 2", "3"))
-        );
+                        new ProblemDetailResponse.StarterCode("java", "class Main {}")),
+                List.of(new ProblemDetailResponse.SampleCase("1 2", "3")));
 
         when(problemService.getProblem(1L, null)).thenReturn(response);
 

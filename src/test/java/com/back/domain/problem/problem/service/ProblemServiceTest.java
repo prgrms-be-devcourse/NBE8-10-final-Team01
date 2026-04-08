@@ -24,25 +24,19 @@ import com.back.domain.problem.problem.entity.Problem;
 import com.back.domain.problem.problem.enums.DifficultyLevel;
 import com.back.domain.problem.problem.repository.ProblemRepository;
 import com.back.domain.problem.testcase.entity.TestCase;
-import com.back.global.exception.ServiceException;
 import com.back.domain.problem.translation.entity.ProblemTranslation;
 import com.back.domain.problem.translation.repository.ProblemTranslationRepository;
-
+import com.back.global.exception.ServiceException;
 
 class ProblemServiceTest {
 
     private final ProblemRepository problemRepository = mock(ProblemRepository.class);
     private final ProblemLanguageProfileRepository problemLanguageProfileRepository =
             mock(ProblemLanguageProfileRepository.class);
-    private final ProblemTranslationRepository problemTranslationRepository =
-            mock(ProblemTranslationRepository.class);
+    private final ProblemTranslationRepository problemTranslationRepository = mock(ProblemTranslationRepository.class);
 
     private final ProblemService problemService =
-            new ProblemService(
-                    problemRepository,
-                    problemLanguageProfileRepository,
-                    problemTranslationRepository
-            );
+            new ProblemService(problemRepository, problemLanguageProfileRepository, problemTranslationRepository);
 
     @Test
     @DisplayName("문제 목록 조회 시 페이지 정보와 요약 목록을 반환한다")
@@ -153,8 +147,7 @@ class ProblemServiceTest {
                 .containsExactly(
                         new ProblemDetailResponse.StarterCode("python3", "print('hello')"),
                         new ProblemDetailResponse.StarterCode("java", "class Main {}"));
-        assertThat(response.sampleCases())
-                .containsExactly(new ProblemDetailResponse.SampleCase("1 2", "3"));
+        assertThat(response.sampleCases()).containsExactly(new ProblemDetailResponse.SampleCase("1 2", "3"));
     }
 
     @Test
@@ -190,8 +183,7 @@ class ProblemServiceTest {
         when(translation.getOutputFormat()).thenReturn("A+B 값을 출력합니다.");
 
         when(problemRepository.findById(1L)).thenReturn(Optional.of(problem));
-        when(problemLanguageProfileRepository.findByProblemIdOrderByIdAsc(1L))
-                .thenReturn(List.of(pythonProfile));
+        when(problemLanguageProfileRepository.findByProblemIdOrderByIdAsc(1L)).thenReturn(List.of(pythonProfile));
         when(problemTranslationRepository.findByProblemIdAndLanguageCode(1L, "ko"))
                 .thenReturn(Optional.of(translation));
 
@@ -231,8 +223,7 @@ class ProblemServiceTest {
         when(pythonProfile.getIsDefault()).thenReturn(true);
 
         when(problemRepository.findById(1L)).thenReturn(Optional.of(problem));
-        when(problemLanguageProfileRepository.findByProblemIdOrderByIdAsc(1L))
-                .thenReturn(List.of(pythonProfile));
+        when(problemLanguageProfileRepository.findByProblemIdOrderByIdAsc(1L)).thenReturn(List.of(pythonProfile));
         when(problemTranslationRepository.findByProblemIdAndLanguageCode(1L, "ko"))
                 .thenReturn(Optional.empty());
 
