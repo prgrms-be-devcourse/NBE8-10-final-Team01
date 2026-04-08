@@ -5,8 +5,11 @@ import java.time.LocalDateTime;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
+
 import com.back.domain.member.member.entity.Member;
 import com.back.domain.problem.problem.entity.Problem;
+import com.back.domain.review.reviewschedule.dto.TodayReviewResponse;
 import com.back.domain.review.reviewschedule.entity.ReviewSchedule;
 import com.back.domain.review.reviewschedule.repository.ReviewScheduleRepository;
 
@@ -17,6 +20,16 @@ import lombok.RequiredArgsConstructor;
 public class ReviewScheduleService {
 
     private final ReviewScheduleRepository reviewScheduleRepository;
+
+    @Transactional(readOnly = true)
+    public TodayReviewResponse getTodayReviews(Long memberId) {
+        List<ReviewSchedule> schedules =
+                reviewScheduleRepository.findTodayReviews(memberId, LocalDateTime.now());
+        List<TodayReviewResponse.ReviewItem> items = schedules.stream()
+                .map(TodayReviewResponse.ReviewItem::from)
+                .toList();
+        return new TodayReviewResponse(items);
+    }
 
     /**
      * AC 결과를 복습 스케줄에 반영한다.
