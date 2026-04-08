@@ -18,6 +18,7 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import com.back.global.jwt.JwtAuthenticationFilter;
 
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 
 @Configuration
@@ -56,7 +57,14 @@ public class SecurityConfig {
                         .anyRequest()
                         .authenticated())
                 // UsernamePasswordAuthenticationFilter 앞에 JWT 필터 삽입
-                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                // 미인증 요청에 대해 기본 403 대신 401 반환
+                // — 프론트의 fetchBackendWithReissue가 401을 감지해 토큰 재발급 후 재시도함
+                .exceptionHandling(ex -> ex.authenticationEntryPoint((request, response, authException) -> {
+                    response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                    response.setContentType("application/json;charset=UTF-8");
+                    response.getWriter().write("{\"message\":\"로그인이 필요합니다.\"}");
+                }));
 
         return http.build();
     }
