@@ -39,6 +39,7 @@ import com.back.domain.matching.queue.model.QueueKey;
 import com.back.domain.matching.queue.model.WaitingUser;
 import com.back.domain.matching.queue.store.MatchingStoreProperties;
 import com.back.domain.matching.queue.store.redis.FakeStringRedisTemplate;
+import com.back.domain.matching.queue.store.redis.MatchingRedisKeys;
 import com.back.domain.matching.queue.store.redis.MatchingRedisSerializer;
 import com.back.domain.matching.queue.store.redis.RedisMatchStateStore;
 import com.fasterxml.jackson.databind.json.JsonMapper;
@@ -193,6 +194,10 @@ class RedisQueueReadyCheckServiceTest {
         assertThat(response.room()).isNotNull();
         assertThat(response.room().roomId()).isEqualTo(100L);
         assertThat(response.readyCheck().acceptedCount()).isEqualTo(4);
+        assertThat(redisTemplate.opsForZSet().score(MatchingRedisKeys.matchDeadline(), String.valueOf(matchId)))
+                .isNull();
+        assertThat(redisTemplate.opsForValue().get(MatchingRedisKeys.match(matchId)))
+                .isNotNull();
         verify(battleRoomService, times(1)).createRoom(any(CreateRoomRequest.class));
         verify(matchingEventPublisher, times(4)).publishRoomReady(any(), any());
     }
@@ -213,6 +218,10 @@ class RedisQueueReadyCheckServiceTest {
         assertThat(response.status()).isEqualTo(MatchStatus.CANCELLED);
         assertThat(response.message()).isNotNull();
         assertThat(readyCheckService.getMyMatchStateV2(1L).status()).isEqualTo(MatchStatus.IDLE);
+        assertThat(redisTemplate.opsForZSet().score(MatchingRedisKeys.matchDeadline(), String.valueOf(matchId)))
+                .isNull();
+        assertThat(redisTemplate.opsForValue().get(MatchingRedisKeys.match(matchId)))
+                .isNull();
         verify(matchingEventPublisher, times(4)).publishMatchCancelled(any(), any());
     }
 
@@ -226,13 +235,38 @@ class RedisQueueReadyCheckServiceTest {
                 new WaitingUser(3L, "m3", queueKey),
                 new WaitingUser(4L, "m4", queueKey));
 
-        store.markAcceptPending(queueKey, users, LocalDateTime.now().minusSeconds(1));
+        var matchSession =
+                store.markAcceptPending(queueKey, users, LocalDateTime.now().minusSeconds(1));
         clearInvocations(matchingEventPublisher);
 
         readyCheckService.expireTimedOutMatches();
 
         assertThat(readyCheckService.getMyMatchStateV2(1L).status()).isEqualTo(MatchStatus.IDLE);
+        assertThat(readyCheckService.getMyQueueStateV2(1L).inQueue()).isFalse();
+        assertThat(redisTemplate
+                        .opsForZSet()
+                        .score(MatchingRedisKeys.matchDeadline(), String.valueOf(matchSession.matchId())))
+                .isNull();
         verify(matchingEventPublisher, times(4)).publishMatchExpired(any(), any());
+    }
+
+    @Test
+    @DisplayName("decline 후 expire 스케줄러는 같은 match 를 중복 만료 처리하지 않는다")
+    void expireTimedOutMatches_doesNotPublishExpiredAgain_afterDecline() {
+        joinUser(1L);
+        joinUser(2L);
+        joinUser(3L);
+        joinUser(4L);
+
+        Long matchId = readyCheckService.getMyMatchStateV2(1L).readyCheck().matchId();
+        readyCheckService.declineMatch(2L, matchId);
+        clearInvocations(matchingEventPublisher);
+
+        readyCheckService.expireTimedOutMatches();
+
+        assertThat(redisTemplate.opsForZSet().score(MatchingRedisKeys.matchDeadline(), String.valueOf(matchId)))
+                .isNull();
+        verify(matchingEventPublisher, times(0)).publishMatchExpired(any(), any());
     }
 
     @Test
