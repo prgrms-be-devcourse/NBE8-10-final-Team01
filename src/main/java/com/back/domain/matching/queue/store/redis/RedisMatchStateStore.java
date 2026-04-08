@@ -1,6 +1,7 @@
 package com.back.domain.matching.queue.store.redis;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -105,12 +106,13 @@ public class RedisMatchStateStore implements MatchStateStore {
             -- MATCHING:MATCH_MARK_ACCEPT_PENDING
             local participantCount = tonumber(ARGV[3])
             redis.call('SET', KEYS[1], ARGV[1])
+            redis.call('ZADD', KEYS[2], ARGV[4], ARGV[2])
 
             for i = 1, participantCount do
-                redis.call('SET', KEYS[i + 1], ARGV[2])
+                redis.call('SET', KEYS[i + 2], ARGV[2])
             end
 
-            for i = participantCount + 2, #KEYS do
+            for i = participantCount + 3, #KEYS do
                 redis.call('DEL', KEYS[i])
             end
 
@@ -268,6 +270,7 @@ public class RedisMatchStateStore implements MatchStateStore {
 
         List<String> keys = new ArrayList<>();
         keys.add(MatchingRedisKeys.match(matchId));
+        keys.add(MatchingRedisKeys.matchDeadline());
         participantIds.forEach(participantId -> keys.add(MatchingRedisKeys.userMatch(participantId)));
         participantIds.forEach(participantId -> keys.add(MatchingRedisKeys.userQueue(participantId)));
 
@@ -276,7 +279,8 @@ public class RedisMatchStateStore implements MatchStateStore {
                 keys,
                 sessionJson,
                 String.valueOf(matchId),
-                String.valueOf(participantIds.size()));
+                String.valueOf(participantIds.size()),
+                String.valueOf(deadlineScore(deadline)));
 
         if (storedJson == null || storedJson.isBlank()) {
             throw new IllegalStateException("Redis ready-check 세션 저장 결과를 확인할 수 없습니다.");
@@ -351,6 +355,7 @@ public class RedisMatchStateStore implements MatchStateStore {
             String updatedJson = serializer.writeMatchSession(roomCreatingSession);
 
             if (compareAndSet(matchKey, currentJson, updatedJson)) {
+                removeDeadlineIndex(matchId);
                 return new RoomCreationAttempt(roomCreatingSession, true);
             }
         }
@@ -378,7 +383,7 @@ public class RedisMatchStateStore implements MatchStateStore {
     public MatchSession expire(Long matchId) {
         return updateMatchSession(matchId, currentSession -> {
             if (currentSession.status() != MatchSessionStatus.ACCEPT_PENDING) {
-                return currentSession;
+                throw new IllegalStateException("이미 만료 처리 대상이 아닌 매치 세션입니다.");
             }
 
             return currentSession.expired();
@@ -461,31 +466,46 @@ public class RedisMatchStateStore implements MatchStateStore {
 
     @Override
     public List<Long> findExpiredAcceptPendingMatchIds(LocalDateTime now) {
-        Set<String> keys = redisTemplate.keys(MatchingRedisKeys.matchPattern());
+        Set<String> candidates = redisTemplate
+                .opsForZSet()
+                .rangeByScore(MatchingRedisKeys.matchDeadline(), Double.NEGATIVE_INFINITY, deadlineScore(now));
 
-        if (keys == null || keys.isEmpty()) {
+        if (candidates == null || candidates.isEmpty()) {
             return List.of();
         }
 
         List<Long> expiredMatchIds = new ArrayList<>();
 
-        // deadline index 도입 전까지는 match 세션 key 들을 임시로 pattern scan 하며 만료 대상을 찾는다.
-        for (String key : keys) {
-            Long matchId = extractMatchIdFromKey(key);
+        // Redis ZSET deadline index 는 후보만 좁혀주고, 최종 만료 여부는 세션 문서를 다시 읽어 확정한다.
+        for (String candidate : candidates) {
+            Long matchId = parseDeadlineMember(candidate);
             if (matchId == null) {
+                redisTemplate.opsForZSet().remove(MatchingRedisKeys.matchDeadline(), candidate);
                 continue;
             }
 
+            String key = MatchingRedisKeys.match(matchId);
             String sessionJson = redisTemplate.opsForValue().get(key);
             if (sessionJson == null || sessionJson.isBlank()) {
+                removeDeadlineIndex(matchId);
                 continue;
             }
 
             MatchSession matchSession = serializer.readMatchSession(sessionJson);
-            if (matchSession.status() == MatchSessionStatus.ACCEPT_PENDING
-                    && matchSession.deadline() != null
-                    && !matchSession.deadline().isAfter(now)) {
+            if (matchSession.status() != MatchSessionStatus.ACCEPT_PENDING) {
+                removeDeadlineIndex(matchId);
+                continue;
+            }
+
+            if (matchSession.deadline() == null) {
+                removeDeadlineIndex(matchId);
+                continue;
+            }
+
+            if (!matchSession.deadline().isAfter(now)) {
                 expiredMatchIds.add(matchSession.matchId());
+            } else {
+                addDeadlineIndex(matchSession);
             }
         }
 
@@ -500,6 +520,7 @@ public class RedisMatchStateStore implements MatchStateStore {
 
         if (matchJson == null || matchJson.isBlank()) {
             removeUserMatchLinksByScan(matchId);
+            removeDeadlineIndex(matchId);
             return;
         }
 
@@ -509,6 +530,7 @@ public class RedisMatchStateStore implements MatchStateStore {
         matchSession.participantIds().forEach(participantId -> keys.add(MatchingRedisKeys.userMatch(participantId)));
 
         redisTemplate.execute(CLEAR_TERMINAL_SCRIPT, keys, String.valueOf(matchId));
+        removeDeadlineIndex(matchId);
     }
 
     @Override
@@ -547,6 +569,7 @@ public class RedisMatchStateStore implements MatchStateStore {
 
         if (!hasRemainingReference) {
             compareAndDelete(matchKey, matchJson);
+            removeDeadlineIndex(matchId);
         }
     }
 
@@ -564,6 +587,7 @@ public class RedisMatchStateStore implements MatchStateStore {
 
             String updatedJson = serializer.writeMatchSession(updatedSession);
             if (compareAndSet(matchKey, currentJson, updatedJson)) {
+                syncDeadlineIndexAfterUpdate(currentSession, updatedSession);
                 return updatedSession;
             }
         }
@@ -652,17 +676,45 @@ public class RedisMatchStateStore implements MatchStateStore {
         }
     }
 
-    private Long extractMatchIdFromKey(String key) {
-        if (key == null || !key.startsWith(MatchingRedisKeys.matchPrefix())) {
+    private Long parseDeadlineMember(String value) {
+        try {
+            return Long.parseLong(value);
+        } catch (NumberFormatException e) {
             return null;
         }
+    }
 
-        String suffix = key.substring(MatchingRedisKeys.matchPrefix().length());
-        if (suffix.isBlank() || !suffix.chars().allMatch(Character::isDigit)) {
-            return null;
+    private void syncDeadlineIndexAfterUpdate(MatchSession previousSession, MatchSession updatedSession) {
+        if (updatedSession.status() == MatchSessionStatus.ACCEPT_PENDING && updatedSession.deadline() != null) {
+            addDeadlineIndex(updatedSession);
+            return;
         }
 
-        return Long.parseLong(suffix);
+        // ACCEPT_PENDING 을 벗어난 세션은 더 이상 스케줄러 만료 후보가 아니므로 deadline index 에서 제거한다.
+        if (previousSession.status() == MatchSessionStatus.ACCEPT_PENDING) {
+            removeDeadlineIndex(updatedSession.matchId());
+        }
+    }
+
+    private void addDeadlineIndex(MatchSession matchSession) {
+        if (matchSession.deadline() == null) {
+            return;
+        }
+
+        redisTemplate
+                .opsForZSet()
+                .add(
+                        MatchingRedisKeys.matchDeadline(),
+                        String.valueOf(matchSession.matchId()),
+                        deadlineScore(matchSession.deadline()));
+    }
+
+    private void removeDeadlineIndex(Long matchId) {
+        redisTemplate.opsForZSet().remove(MatchingRedisKeys.matchDeadline(), String.valueOf(matchId));
+    }
+
+    private double deadlineScore(LocalDateTime deadline) {
+        return deadline.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
     }
 
     @SuppressWarnings("unchecked")

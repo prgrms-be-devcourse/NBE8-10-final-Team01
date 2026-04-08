@@ -1,5 +1,6 @@
 package com.back.domain.matching.queue.store.redis;
 
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
@@ -8,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
@@ -17,6 +19,7 @@ import java.util.Set;
 import org.springframework.data.redis.core.ListOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.data.redis.core.script.RedisScript;
 
 /**
@@ -30,8 +33,10 @@ public class FakeStringRedisTemplate extends StringRedisTemplate {
     private final Object monitor = new Object();
     private final Map<String, String> values = new HashMap<>();
     private final Map<String, LinkedList<String>> lists = new HashMap<>();
+    private final Map<String, Map<String, Double>> zsets = new HashMap<>();
     private final ValueOperations<String, String> valueOperations = mock(ValueOperations.class);
     private final ListOperations<String, String> listOperations = mock(ListOperations.class);
+    private final ZSetOperations<String, String> zSetOperations = mock(ZSetOperations.class);
 
     public FakeStringRedisTemplate() {
         when(valueOperations.get(anyString())).thenAnswer(invocation -> {
@@ -59,6 +64,48 @@ public class FakeStringRedisTemplate extends StringRedisTemplate {
                 return index >= 0 && index < queue.size() ? queue.get((int) index) : null;
             }
         });
+        when(zSetOperations.add(anyString(), anyString(), anyDouble())).thenAnswer(invocation -> {
+            synchronized (monitor) {
+                zset(invocation.getArgument(0)).put(invocation.getArgument(1), invocation.getArgument(2));
+                return true;
+            }
+        });
+        when(zSetOperations.rangeByScore(anyString(), anyDouble(), anyDouble())).thenAnswer(invocation -> {
+            synchronized (monitor) {
+                String key = invocation.getArgument(0);
+                double min = invocation.getArgument(1);
+                double max = invocation.getArgument(2);
+
+                Set<String> result = new LinkedHashSet<>();
+                zset(key).entrySet().stream()
+                        .filter(entry -> entry.getValue() >= min && entry.getValue() <= max)
+                        .sorted(Map.Entry.comparingByValue())
+                        .map(Map.Entry::getKey)
+                        .forEach(result::add);
+                return result;
+            }
+        });
+        when(zSetOperations.remove(anyString(), anyString())).thenAnswer(invocation -> {
+            synchronized (monitor) {
+                Map<String, Double> zset = zset(invocation.getArgument(0));
+                long removed = 0L;
+
+                Object[] arguments = invocation.getArguments();
+                for (int i = 1; i < arguments.length; i++) {
+                    if (zset.remove(String.valueOf(arguments[i])) != null) {
+                        removed++;
+                    }
+                }
+
+                return removed;
+            }
+        });
+        when(zSetOperations.score(anyString(), anyString())).thenAnswer(invocation -> {
+            synchronized (monitor) {
+                Object member = invocation.getArgument(1);
+                return zset(invocation.getArgument(0)).get(String.valueOf(member));
+            }
+        });
         doAnswer(invocation -> {
                     synchronized (monitor) {
                         values.put(invocation.getArgument(0), invocation.getArgument(1));
@@ -80,10 +127,16 @@ public class FakeStringRedisTemplate extends StringRedisTemplate {
     }
 
     @Override
+    public ZSetOperations<String, String> opsForZSet() {
+        return zSetOperations;
+    }
+
+    @Override
     public Boolean delete(String key) {
         synchronized (monitor) {
             boolean removed = values.remove(key) != null;
             removed = lists.remove(key) != null || removed;
+            removed = zsets.remove(key) != null || removed;
             return removed;
         }
     }
@@ -109,6 +162,7 @@ public class FakeStringRedisTemplate extends StringRedisTemplate {
             Set<String> result = new LinkedHashSet<>();
             values.keySet().stream().filter(key -> matches(key, pattern)).forEach(result::add);
             lists.keySet().stream().filter(key -> matches(key, pattern)).forEach(result::add);
+            zsets.keySet().stream().filter(key -> matches(key, pattern)).forEach(result::add);
             return result;
         }
     }
@@ -231,14 +285,16 @@ public class FakeStringRedisTemplate extends StringRedisTemplate {
         String sessionJson = String.valueOf(args[0]);
         String matchId = String.valueOf(args[1]);
         int participantCount = Integer.parseInt(String.valueOf(args[2]));
+        double deadlineScore = Double.parseDouble(String.valueOf(args[3]));
 
         values.put(keys.get(0), sessionJson);
+        zset(keys.get(1)).put(matchId, deadlineScore);
 
         for (int i = 1; i <= participantCount; i++) {
-            values.put(keys.get(i), matchId);
+            values.put(keys.get(i + 1), matchId);
         }
 
-        for (int i = participantCount + 1; i < keys.size(); i++) {
+        for (int i = participantCount + 2; i < keys.size(); i++) {
             values.remove(keys.get(i));
         }
 
@@ -298,5 +354,9 @@ public class FakeStringRedisTemplate extends StringRedisTemplate {
 
     private LinkedList<String> list(String key) {
         return lists.computeIfAbsent(key, ignored -> new LinkedList<>());
+    }
+
+    private Map<String, Double> zset(String key) {
+        return zsets.computeIfAbsent(key, ignored -> new LinkedHashMap<>());
     }
 }

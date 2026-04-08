@@ -55,24 +55,10 @@ public final class MatchingRedisKeys {
     }
 
     /**
-     * ready-check session key 를 훑을 때 사용하는 임시 패턴이다.
-     */
-    public static String matchPattern() {
-        return MATCH_PREFIX + ":*";
-    }
-
-    /**
      * user:match 인덱스 전체를 훑을 때 사용하는 패턴이다.
      */
     public static String userMatchPattern() {
         return USER_MATCH_PREFIX + ":*";
-    }
-
-    /**
-     * match session key prefix 를 외부 helper 에서 재사용할 수 있게 노출한다.
-     */
-    public static String matchPrefix() {
-        return MATCH_PREFIX + ":";
     }
 
     /**

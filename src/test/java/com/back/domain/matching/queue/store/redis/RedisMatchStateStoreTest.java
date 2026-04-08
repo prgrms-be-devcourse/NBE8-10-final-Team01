@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -98,14 +99,14 @@ class RedisMatchStateStoreTest {
     }
 
     @Test
-    @DisplayName("markAcceptPending 은 match 문서와 userMatch 인덱스를 함께 저장하고 userQueue 를 삭제한다")
+    @DisplayName("markAcceptPending 은 match 문서, userMatch 인덱스, deadline index 를 함께 저장하고 userQueue 를 삭제한다")
     void markAcceptPending_storesReadyCheckStateInRedis() {
         QueueKey queueKey = queueKey();
         enqueueUsers(queueKey, 4);
         List<WaitingUser> matchedUsers = store.pollMatchCandidates(queueKey, 4);
+        LocalDateTime deadline = LocalDateTime.of(2026, 4, 6, 12, 30, 0);
 
-        MatchSession matchSession =
-                store.markAcceptPending(queueKey, matchedUsers, LocalDateTime.of(2026, 4, 6, 12, 30, 0));
+        MatchSession matchSession = store.markAcceptPending(queueKey, matchedUsers, deadline);
 
         assertThat(matchSession.status()).isEqualTo(MatchSessionStatus.ACCEPT_PENDING);
         assertThat(redisTemplate.opsForValue().get(MatchingRedisKeys.match(matchSession.matchId())))
@@ -114,6 +115,10 @@ class RedisMatchStateStoreTest {
                 .isEqualTo(String.valueOf(matchSession.matchId()));
         assertThat(redisTemplate.opsForValue().get(MatchingRedisKeys.userQueue(1L)))
                 .isNull();
+        assertThat(redisTemplate
+                        .opsForZSet()
+                        .score(MatchingRedisKeys.matchDeadline(), String.valueOf(matchSession.matchId())))
+                .isEqualTo(deadlineScore(deadline));
     }
 
     @Test
@@ -154,6 +159,10 @@ class RedisMatchStateStoreTest {
 
         assertThat(declined.status()).isEqualTo(MatchSessionStatus.CANCELLED);
         assertThat(declined.decisionOf(2L)).isEqualTo(ReadyDecision.DECLINED);
+        assertThat(redisTemplate
+                        .opsForZSet()
+                        .score(MatchingRedisKeys.matchDeadline(), String.valueOf(matchSession.matchId())))
+                .isNull();
     }
 
     @Test
@@ -164,6 +173,21 @@ class RedisMatchStateStoreTest {
         MatchSession expired = store.accept(matchSession.matchId(), 1L);
 
         assertThat(expired.status()).isEqualTo(MatchSessionStatus.EXPIRED);
+        assertThat(redisTemplate
+                        .opsForZSet()
+                        .score(MatchingRedisKeys.matchDeadline(), String.valueOf(matchSession.matchId())))
+                .isNull();
+    }
+
+    @Test
+    @DisplayName("expire 는 이미 ACCEPT_PENDING 이 아닌 세션을 중복 만료 처리하지 않는다")
+    void expire_rejectsAlreadyTerminalSession() {
+        MatchSession matchSession = createAcceptPendingMatch(LocalDateTime.now().plusSeconds(30));
+        store.decline(matchSession.matchId(), 1L);
+
+        assertThatThrownBy(() -> store.expire(matchSession.matchId()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("이미 만료 처리 대상이 아닌 매치 세션입니다.");
     }
 
     @Test
@@ -182,6 +206,10 @@ class RedisMatchStateStoreTest {
         assertThat(firstAttempt.matchSession().status()).isEqualTo(MatchSessionStatus.ROOM_CREATING);
         assertThat(secondAttempt.acquired()).isFalse();
         assertThat(secondAttempt.matchSession().status()).isEqualTo(MatchSessionStatus.ROOM_CREATING);
+        assertThat(redisTemplate
+                        .opsForZSet()
+                        .score(MatchingRedisKeys.matchDeadline(), String.valueOf(matchSession.matchId())))
+                .isNull();
     }
 
     @Test
@@ -198,6 +226,10 @@ class RedisMatchStateStoreTest {
         store.clearMatchedRoom(1L, 100L);
 
         assertThat(roomReady.status()).isEqualTo(MatchSessionStatus.ROOM_READY);
+        assertThat(redisTemplate
+                        .opsForZSet()
+                        .score(MatchingRedisKeys.matchDeadline(), String.valueOf(matchSession.matchId())))
+                .isNull();
         assertThat(store.findMatchSessionByUserId(1L)).isNull();
         assertThat(store.findMatchSessionByUserId(2L)).isNotNull();
 
@@ -223,10 +255,14 @@ class RedisMatchStateStoreTest {
                 .isNull();
         assertThat(redisTemplate.opsForValue().get(MatchingRedisKeys.userMatch(4L)))
                 .isNull();
+        assertThat(redisTemplate
+                        .opsForZSet()
+                        .score(MatchingRedisKeys.matchDeadline(), String.valueOf(matchSession.matchId())))
+                .isNull();
     }
 
     @Test
-    @DisplayName("findExpiredAcceptPendingMatchIds 는 임시 match key scan 기준으로 만료 세션만 반환한다")
+    @DisplayName("findExpiredAcceptPendingMatchIds 는 deadline index 기준으로 만료 세션만 반환한다")
     void findExpiredAcceptPendingMatchIds_returnsExpiredMatches() {
         MatchSession expired = createAcceptPendingMatch(LocalDateTime.now().minusSeconds(1));
         MatchSession active = createAcceptPendingMatch(LocalDateTime.now().plusSeconds(30), 11L);
@@ -235,6 +271,19 @@ class RedisMatchStateStoreTest {
 
         assertThat(expiredMatchIds).contains(expired.matchId());
         assertThat(expiredMatchIds).doesNotContain(active.matchId());
+    }
+
+    @Test
+    @DisplayName("findExpiredAcceptPendingMatchIds 는 stale deadline index member 를 정리한다")
+    void findExpiredAcceptPendingMatchIds_cleansStaleDeadlineMembers() {
+        MatchSession stale = createAcceptPendingMatch(LocalDateTime.now().minusSeconds(1));
+        redisTemplate.delete(MatchingRedisKeys.match(stale.matchId()));
+
+        List<Long> expiredMatchIds = store.findExpiredAcceptPendingMatchIds(LocalDateTime.now());
+
+        assertThat(expiredMatchIds).doesNotContain(stale.matchId());
+        assertThat(redisTemplate.opsForZSet().score(MatchingRedisKeys.matchDeadline(), String.valueOf(stale.matchId())))
+                .isNull();
     }
 
     private MatchSession createAcceptPendingMatch(LocalDateTime deadline) {
@@ -260,5 +309,9 @@ class RedisMatchStateStoreTest {
         for (long userId = 1L; userId <= count; userId++) {
             store.enqueue(userId, "m" + userId, queueKey);
         }
+    }
+
+    private double deadlineScore(LocalDateTime deadline) {
+        return deadline.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
     }
 }
