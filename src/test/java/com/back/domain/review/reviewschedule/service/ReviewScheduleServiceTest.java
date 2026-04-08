@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.DisplayName;
@@ -17,6 +18,7 @@ import org.mockito.ArgumentCaptor;
 
 import com.back.domain.member.member.entity.Member;
 import com.back.domain.problem.problem.entity.Problem;
+import com.back.domain.review.reviewschedule.dto.TodayReviewResponse;
 import com.back.domain.review.reviewschedule.entity.ReviewSchedule;
 import com.back.domain.review.reviewschedule.repository.ReviewScheduleRepository;
 
@@ -102,6 +104,53 @@ class ReviewScheduleServiceTest {
 
         assertThat(existing.getReviewCount()).isEqualTo(5);
         assertThat(existing.isReviewRequired()).isFalse();
+    }
+
+    @Test
+    @DisplayName("오늘 복습할 스케줄이 있으면 ReviewItem 목록을 반환한다")
+    void getTodayReviews_returnsItems() {
+        ReviewSchedule schedule1 = scheduleWithReviewCount(1);
+        ReviewSchedule schedule2 = scheduleWithReviewCount(2);
+
+        Problem p1 = mock(Problem.class);
+        Problem p2 = mock(Problem.class);
+        when(p1.getId()).thenReturn(10L);
+        when(p1.getTitle()).thenReturn("문제A");
+        when(p2.getId()).thenReturn(20L);
+        when(p2.getTitle()).thenReturn("문제B");
+
+        // reflection으로 problem 필드를 직접 설정하는 대신
+        // scheduleWithReviewCount가 this.problem(mock)을 사용하므로
+        // member/problem mock을 각 schedule 전용으로 따로 생성한다.
+        Member m1 = mock(Member.class);
+        Member m2 = mock(Member.class);
+        ReviewSchedule s1 = ReviewSchedule.of(m1, p1, solvedAt, solvedAt.plusDays(3));
+        ReviewSchedule s2 = ReviewSchedule.of(m2, p2, solvedAt, solvedAt.plusDays(3));
+        s2.updateOnAc(solvedAt, solvedAt.plusDays(7), true);
+
+        Long memberId = 99L;
+        when(reviewScheduleRepository.findTodayReviews(any(), any()))
+                .thenReturn(List.of(s1, s2));
+
+        TodayReviewResponse response = reviewScheduleService.getTodayReviews(memberId);
+
+        assertThat(response.reviews()).hasSize(2);
+        assertThat(response.reviews().get(0).problemId()).isEqualTo(10L);
+        assertThat(response.reviews().get(0).problemTitle()).isEqualTo("문제A");
+        assertThat(response.reviews().get(0).reviewCount()).isEqualTo(1);
+        assertThat(response.reviews().get(1).problemId()).isEqualTo(20L);
+        assertThat(response.reviews().get(1).reviewCount()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("오늘 복습할 스케줄이 없으면 빈 목록을 반환한다")
+    void getTodayReviews_returnsEmptyList() {
+        when(reviewScheduleRepository.findTodayReviews(any(), any()))
+                .thenReturn(List.of());
+
+        TodayReviewResponse response = reviewScheduleService.getTodayReviews(1L);
+
+        assertThat(response.reviews()).isEmpty();
     }
 
     /**
