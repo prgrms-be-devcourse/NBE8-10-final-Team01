@@ -22,8 +22,7 @@ class ReviewScheduleControllerTest {
 
     private final ReviewScheduleService reviewScheduleService = mock(ReviewScheduleService.class);
     private final Rq rq = mock(Rq.class);
-    private final ReviewScheduleController controller =
-            new ReviewScheduleController(reviewScheduleService, rq);
+    private final ReviewScheduleController controller = new ReviewScheduleController(reviewScheduleService, rq);
 
     @Test
     @DisplayName("비로그인 상태에서 요청하면 401을 반환한다")
@@ -40,8 +39,7 @@ class ReviewScheduleControllerTest {
     @DisplayName("로그인 상태에서 요청하면 서비스 결과와 함께 200을 반환한다")
     void getTodayReviews_authenticated_returns200WithItems() {
         Member actor = Member.of(1L, "test@test.com", "tester");
-        TodayReviewResponse.ReviewItem item =
-                new TodayReviewResponse.ReviewItem(10L, "문제A", 1);
+        TodayReviewResponse.ReviewItem item = new TodayReviewResponse.ReviewItem(10L, "문제A", 1);
         TodayReviewResponse serviceResponse = new TodayReviewResponse(List.of(item));
 
         when(rq.getActor()).thenReturn(actor);
@@ -79,7 +77,8 @@ class ReviewScheduleControllerTest {
         RsData<Void> result = controller.dismissReview(10L);
 
         assertThat(result.resultCode()).isEqualTo("401");
-        verify(reviewScheduleService, never()).dismissReview(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyLong());
+        verify(reviewScheduleService, never())
+                .dismissReview(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyLong());
     }
 
     @Test

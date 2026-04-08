@@ -1,13 +1,12 @@
 package com.back.domain.review.reviewschedule.service;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
-
-import java.util.List;
 
 import com.back.domain.member.member.entity.Member;
 import com.back.domain.problem.problem.entity.Problem;
@@ -25,17 +24,16 @@ public class ReviewScheduleService {
 
     @Transactional(readOnly = true)
     public TodayReviewResponse getTodayReviews(Long memberId) {
-        List<ReviewSchedule> schedules =
-                reviewScheduleRepository.findTodayReviews(memberId, LocalDateTime.now());
-        List<TodayReviewResponse.ReviewItem> items = schedules.stream()
-                .map(TodayReviewResponse.ReviewItem::from)
-                .toList();
+        List<ReviewSchedule> schedules = reviewScheduleRepository.findTodayReviews(memberId, LocalDateTime.now());
+        List<TodayReviewResponse.ReviewItem> items =
+                schedules.stream().map(TodayReviewResponse.ReviewItem::from).toList();
         return new TodayReviewResponse(items);
     }
 
     @Transactional
     public void dismissReview(Long problemId, Long memberId) {
-        ReviewSchedule schedule = reviewScheduleRepository.findByMemberIdAndProblemId(memberId, problemId)
+        ReviewSchedule schedule = reviewScheduleRepository
+                .findByMemberIdAndProblemId(memberId, problemId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "복습 스케줄을 찾을 수 없습니다."));
         schedule.dismiss();
     }
@@ -48,19 +46,18 @@ public class ReviewScheduleService {
      */
     @Transactional
     public void recordAcResult(Member member, Problem problem, LocalDateTime solvedAt) {
-        reviewScheduleRepository.findByMemberAndProblem(member, problem)
+        reviewScheduleRepository
+                .findByMemberAndProblem(member, problem)
                 .ifPresentOrElse(
                         schedule -> {
                             int nextCount = schedule.getReviewCount() + 1;
                             boolean isReviewRequired = nextCount <= 4;
-                            LocalDateTime nextReviewAt = isReviewRequired
-                                    ? calcNextReviewAt(solvedAt, nextCount)
-                                    : solvedAt;
+                            LocalDateTime nextReviewAt =
+                                    isReviewRequired ? calcNextReviewAt(solvedAt, nextCount) : solvedAt;
                             schedule.updateOnAc(solvedAt, nextReviewAt, isReviewRequired);
                         },
                         () -> reviewScheduleRepository.save(
-                                ReviewSchedule.of(member, problem, solvedAt, solvedAt.plusDays(3)))
-                );
+                                ReviewSchedule.of(member, problem, solvedAt, solvedAt.plusDays(3))));
     }
 
     /**

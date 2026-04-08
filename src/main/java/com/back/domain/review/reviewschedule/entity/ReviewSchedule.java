@@ -31,14 +31,15 @@ public class ReviewSchedule extends BaseEntity {
 
     private LocalDateTime solvedAt;
     private LocalDateTime nextReviewAt;
+
     @Column(nullable = false)
     private Integer reviewCount;
 
     @Column(nullable = false)
     private boolean isReviewRequired = true;
 
-    public static ReviewSchedule of(Member member, Problem problem,
-            LocalDateTime solvedAt, LocalDateTime nextReviewAt) {
+    public static ReviewSchedule of(
+            Member member, Problem problem, LocalDateTime solvedAt, LocalDateTime nextReviewAt) {
         ReviewSchedule schedule = new ReviewSchedule();
         schedule.member = member;
         schedule.problem = problem;

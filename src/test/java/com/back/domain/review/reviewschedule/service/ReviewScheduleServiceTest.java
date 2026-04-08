@@ -13,11 +13,10 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
-import org.springframework.web.server.ResponseStatusException;
-
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.web.server.ResponseStatusException;
 
 import com.back.domain.member.member.entity.Member;
 import com.back.domain.problem.problem.entity.Problem;
@@ -37,8 +36,7 @@ class ReviewScheduleServiceTest {
     @Test
     @DisplayName("첫 AC 시 reviewCount=1, nextReviewAt=+3일로 복습 스케줄을 신규 생성한다")
     void firstAc_createsNewSchedule() {
-        when(reviewScheduleRepository.findByMemberAndProblem(member, problem))
-                .thenReturn(Optional.empty());
+        when(reviewScheduleRepository.findByMemberAndProblem(member, problem)).thenReturn(Optional.empty());
 
         reviewScheduleService.recordAcResult(member, problem, solvedAt);
 
@@ -56,8 +54,7 @@ class ReviewScheduleServiceTest {
     @DisplayName("두 번째 AC 시 nextReviewAt을 7일 후로 갱신한다")
     void secondAc_updatesNextReviewTo7Days() {
         ReviewSchedule existing = ReviewSchedule.of(member, problem, solvedAt.minusDays(3), solvedAt);
-        when(reviewScheduleRepository.findByMemberAndProblem(member, problem))
-                .thenReturn(Optional.of(existing));
+        when(reviewScheduleRepository.findByMemberAndProblem(member, problem)).thenReturn(Optional.of(existing));
 
         reviewScheduleService.recordAcResult(member, problem, solvedAt);
 
@@ -72,8 +69,7 @@ class ReviewScheduleServiceTest {
     @DisplayName("세 번째 AC 시 nextReviewAt을 30일 후로 갱신한다")
     void thirdAc_updatesNextReviewTo30Days() {
         ReviewSchedule existing = scheduleWithReviewCount(2);
-        when(reviewScheduleRepository.findByMemberAndProblem(member, problem))
-                .thenReturn(Optional.of(existing));
+        when(reviewScheduleRepository.findByMemberAndProblem(member, problem)).thenReturn(Optional.of(existing));
 
         reviewScheduleService.recordAcResult(member, problem, solvedAt);
 
@@ -86,8 +82,7 @@ class ReviewScheduleServiceTest {
     @DisplayName("네 번째 AC 시 nextReviewAt을 180일 후로 갱신한다")
     void fourthAc_updatesNextReviewTo180Days() {
         ReviewSchedule existing = scheduleWithReviewCount(3);
-        when(reviewScheduleRepository.findByMemberAndProblem(member, problem))
-                .thenReturn(Optional.of(existing));
+        when(reviewScheduleRepository.findByMemberAndProblem(member, problem)).thenReturn(Optional.of(existing));
 
         reviewScheduleService.recordAcResult(member, problem, solvedAt);
 
@@ -100,8 +95,7 @@ class ReviewScheduleServiceTest {
     @DisplayName("다섯 번째 AC 이후 모든 복습을 완료하면 isReviewRequired를 false로 설정한다")
     void fifthAcOrMore_setsReviewRequiredFalse() {
         ReviewSchedule existing = scheduleWithReviewCount(4);
-        when(reviewScheduleRepository.findByMemberAndProblem(member, problem))
-                .thenReturn(Optional.of(existing));
+        when(reviewScheduleRepository.findByMemberAndProblem(member, problem)).thenReturn(Optional.of(existing));
 
         reviewScheduleService.recordAcResult(member, problem, solvedAt);
 
@@ -125,8 +119,7 @@ class ReviewScheduleServiceTest {
         ReviewSchedule s2 = ReviewSchedule.of(m2, p2, solvedAt, solvedAt.plusDays(3));
         s2.updateOnAc(solvedAt, solvedAt.plusDays(7), true);
 
-        when(reviewScheduleRepository.findTodayReviews(any(), any()))
-                .thenReturn(List.of(s1, s2));
+        when(reviewScheduleRepository.findTodayReviews(any(), any())).thenReturn(List.of(s1, s2));
 
         TodayReviewResponse response = reviewScheduleService.getTodayReviews(99L);
 
@@ -141,8 +134,7 @@ class ReviewScheduleServiceTest {
     @Test
     @DisplayName("오늘 복습할 스케줄이 없으면 빈 목록을 반환한다")
     void getTodayReviews_returnsEmptyList() {
-        when(reviewScheduleRepository.findTodayReviews(any(), any()))
-                .thenReturn(List.of());
+        when(reviewScheduleRepository.findTodayReviews(any(), any())).thenReturn(List.of());
 
         TodayReviewResponse response = reviewScheduleService.getTodayReviews(1L);
 
@@ -153,8 +145,7 @@ class ReviewScheduleServiceTest {
     @DisplayName("dismissReview 호출 시 isReviewRequired가 false로 변경된다")
     void dismissReview_setsReviewRequiredFalse() {
         ReviewSchedule schedule = scheduleWithReviewCount(1);
-        when(reviewScheduleRepository.findByMemberIdAndProblemId(1L, 10L))
-                .thenReturn(Optional.of(schedule));
+        when(reviewScheduleRepository.findByMemberIdAndProblemId(1L, 10L)).thenReturn(Optional.of(schedule));
 
         reviewScheduleService.dismissReview(10L, 1L);
 
@@ -164,8 +155,7 @@ class ReviewScheduleServiceTest {
     @Test
     @DisplayName("존재하지 않는 스케줄을 dismiss하면 예외가 발생한다")
     void dismissReview_notFound_throwsException() {
-        when(reviewScheduleRepository.findByMemberIdAndProblemId(1L, 10L))
-                .thenReturn(Optional.empty());
+        when(reviewScheduleRepository.findByMemberIdAndProblemId(1L, 10L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> reviewScheduleService.dismissReview(10L, 1L))
                 .isInstanceOf(ResponseStatusException.class);

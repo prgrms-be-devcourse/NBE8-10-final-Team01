@@ -75,10 +75,8 @@ public class SoloJudgeService {
         if (judgeResult == SubmissionResult.AC) {
             LocalDateTime now = LocalDateTime.now();
             // 문제별 첫 AC일 때만 솔로 난이도 점수/카운트를 반영한다.
-            ratingProfileService.applySoloFirstSolve(
-                    submission.getMember(), submission.getProblem(), now);
-            reviewScheduleService.recordAcResult(
-                    submission.getMember(), submission.getProblem(), now);
+            ratingProfileService.applySoloFirstSolve(submission.getMember(), submission.getProblem(), now);
+            reviewScheduleService.recordAcResult(submission.getMember(), submission.getProblem(), now);
         }
 
         publisher.publish(
