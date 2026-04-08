@@ -49,9 +49,11 @@ cd "$(git rev-parse --show-toplevel)" && set -a && source .env && set +a && pyth
 
 ```bash
 cd "$(git rev-parse --show-toplevel)" && python3 -m pip install -U "psycopg[binary]" openai
-cd "$(git rev-parse --show-toplevel)" && set -a && source .env && set +a && python3 scripts/translate_problems_ko.py --dry-run --limit 50
-cd "$(git rev-parse --show-toplevel)" && set -a && source .env && set +a && python3 scripts/translate_problems_ko.py --force --limit 200 --chunk-size 50 --request-interval-ms 250
+cd "$(git rev-parse --show-toplevel)" && set -a && source .env && set +a && python3 scripts/translate_problems_ko.py --dry-run --limit 50 --price-input-per-1m 0.05 --price-output-per-1m 0.4
+cd "$(git rev-parse --show-toplevel)" && set -a && source .env && set +a && python3 scripts/translate_problems_ko.py --force --limit 200 --chunk-size 50 --max-bytes-per-request 9000 --request-interval-ms 0 --progress-every 1 --model gpt-4o-mini
 ```
 주의:
-- 운영 환경에서는 EC2 IAM Role에 `TranslateText` 권한이 필요합니다.
+- `--dry-run`은 API 호출/DB 쓰기를 하지 않고, 예상 호출 수/토큰/비용만 출력합니다.
+- OpenAI 대신 로컬 Ollama를 쓰려면 `OPENAI_BASE_URL=http://127.0.0.1:11434/v1`, `OPENAI_API_KEY=ollama`를 설정하세요.
 - `--force` 없이 재실행하면 source hash가 동일한 문제는 건너뜁니다.
+- 429/타임아웃이 나오면 `--request-interval-ms`를 `20~50`으로 올리고, `--limit 20` 단위로 나눠 실행하세요.
