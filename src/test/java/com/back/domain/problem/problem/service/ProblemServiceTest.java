@@ -184,7 +184,7 @@ class ProblemServiceTest {
 
         when(problemRepository.findById(1L)).thenReturn(Optional.of(problem));
         when(problemLanguageProfileRepository.findByProblemIdOrderByIdAsc(1L)).thenReturn(List.of(pythonProfile));
-        when(problemTranslationRepository.findByProblemIdAndLanguageCode(1L, "ko"))
+        when(problemTranslationRepository.findByProblem_IdAndLanguageCode(1L, "ko"))
                 .thenReturn(Optional.of(translation));
 
         // when
@@ -224,7 +224,7 @@ class ProblemServiceTest {
 
         when(problemRepository.findById(1L)).thenReturn(Optional.of(problem));
         when(problemLanguageProfileRepository.findByProblemIdOrderByIdAsc(1L)).thenReturn(List.of(pythonProfile));
-        when(problemTranslationRepository.findByProblemIdAndLanguageCode(1L, "ko"))
+        when(problemTranslationRepository.findByProblem_IdAndLanguageCode(1L, "ko"))
                 .thenReturn(Optional.empty());
 
         // when
