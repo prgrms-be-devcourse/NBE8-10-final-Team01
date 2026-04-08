@@ -29,7 +29,29 @@ public class ReviewSchedule extends BaseEntity {
     @JoinColumn(name = "problem_id")
     private Problem problem;
 
-    private LocalDateTime solvedAt; // 마지막으로 푼 날짜
-    private LocalDateTime nextReviewAt; // 다음 복습 예정일
-    private Integer reviewCount; // 복습 횟수
+    private LocalDateTime solvedAt;
+    private LocalDateTime nextReviewAt;
+    private Integer reviewCount;
+
+    @Column(nullable = false)
+    private boolean isReviewRequired = true;
+
+    public static ReviewSchedule of(Member member, Problem problem,
+            LocalDateTime solvedAt, LocalDateTime nextReviewAt) {
+        ReviewSchedule schedule = new ReviewSchedule();
+        schedule.member = member;
+        schedule.problem = problem;
+        schedule.solvedAt = solvedAt;
+        schedule.nextReviewAt = nextReviewAt;
+        schedule.reviewCount = 1;
+        schedule.isReviewRequired = true;
+        return schedule;
+    }
+
+    public void updateOnAc(LocalDateTime solvedAt, LocalDateTime nextReviewAt, boolean isReviewRequired) {
+        this.solvedAt = solvedAt;
+        this.nextReviewAt = nextReviewAt;
+        this.reviewCount = this.reviewCount + 1;
+        this.isReviewRequired = isReviewRequired;
+    }
 }
