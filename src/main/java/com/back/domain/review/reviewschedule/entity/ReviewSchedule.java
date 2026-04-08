@@ -31,6 +31,7 @@ public class ReviewSchedule extends BaseEntity {
 
     private LocalDateTime solvedAt;
     private LocalDateTime nextReviewAt;
+    @Column(nullable = false)
     private Integer reviewCount;
 
     @Column(nullable = false)
