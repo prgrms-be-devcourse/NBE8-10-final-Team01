@@ -44,4 +44,14 @@ public class ProblemLanguageProfile extends BaseEntity {
     @Column(name = "is_default", nullable = false)
     // 상세 화면 기본 선택 언어 여부
     private Boolean isDefault;
+
+    public static ProblemLanguageProfile create(
+            Problem problem, String languageCode, String starterCode, Boolean isDefault) {
+        ProblemLanguageProfile profile = new ProblemLanguageProfile();
+        profile.problem = problem;
+        profile.languageCode = languageCode;
+        profile.starterCode = starterCode;
+        profile.isDefault = Boolean.TRUE.equals(isDefault);
+        return profile;
+    }
 }
