@@ -25,7 +25,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class MemberRatingProgressService {
 
-    private static final int INITIAL_SKILL_RATING = 1000;
+    private static final int INITIAL_SKILL_RATING = 0;
     private static final int INITIAL_ACTIVITY_POINT = 0;
     private static final int TOP2_WINDOW_SIZE = 20;
     private static final String COMPARISON_AT_LEAST = "AT_LEAST";
@@ -53,7 +53,6 @@ public class MemberRatingProgressService {
         int battleMatchCount = nullToZero(profile.getBattleMatchCount());
         int firstSolvedProblemCount = nullToZero(profile.getFirstSolvedProblemCount());
         int battleRating = nullToDefault(profile.getBattleRating(), INITIAL_SKILL_RATING);
-        int hardBattleRating = nullToDefault(profile.getHardBattleRating(), INITIAL_SKILL_RATING);
         int activityPoint = nullToDefault(profile.getFirstSolveScore(), INITIAL_ACTIVITY_POINT);
         RatingTier currentTier = profile.getTier() == null ? RatingTier.BRONZE_5 : profile.getTier();
         String displayTier = TierPolicy.resolveDisplayTier(currentTier, battleMatchCount, firstSolvedProblemCount);
@@ -76,7 +75,6 @@ public class MemberRatingProgressService {
                 displayTier,
                 currentTier.name(),
                 battleRating,
-                hardBattleRating,
                 activityPoint,
                 battleMatchCount,
                 firstSolvedProblemCount,
@@ -91,7 +89,6 @@ public class MemberRatingProgressService {
                 displayTier,
                 currentTier,
                 battleRating,
-                hardBattleRating,
                 activityPoint,
                 battleMatchCount,
                 firstSolvedProblemCount,
@@ -109,7 +106,6 @@ public class MemberRatingProgressService {
             String displayTier,
             RatingTier currentTier,
             int battleRating,
-            int hardBattleRating,
             int activityPoint,
             int battleMatchCount,
             int firstSolvedProblemCount,
@@ -149,7 +145,7 @@ public class MemberRatingProgressService {
             boolean seatSatisfied = seatRank != null && seatRank <= 5;
             RatingProgressResponse.RequirementProgress seatRequirement = new RatingProgressResponse.RequirementProgress(
                     "godSeatRank",
-                    "MASTER_1 상위 5석(Hard SR 순위)",
+                    "MASTER_1 상위 5석(SR 순위)",
                     COMPARISON_AT_MOST,
                     currentRank,
                     5.0d,
@@ -159,7 +155,7 @@ public class MemberRatingProgressService {
             return new RatingProgressResponse.NextTierProgress(
                     nextTier.name(),
                     seatSatisfied,
-                    "GOD은 MASTER_1 유저 중 Hard SR 상위 5명에게만 부여됩니다.",
+                    "GOD은 MASTER_1 유저 중 SR 상위 5명에게만 부여됩니다.",
                     seatRank,
                     List.of(seatRequirement));
         }
@@ -170,12 +166,6 @@ public class MemberRatingProgressService {
         if (requiredSkillRating != null) {
             requirements.add(
                     buildAtLeastRequirement("battleRating", "SR (battleRating)", battleRating, requiredSkillRating));
-        }
-
-        Integer requiredHardSkillRating = resolveHardSkillThreshold(nextTier);
-        if (requiredHardSkillRating != null) {
-            requirements.add(
-                    buildAtLeastRequirement("hardBattleRating", "Hard SR", hardBattleRating, requiredHardSkillRating));
         }
 
         GateRequirement gateRequirement = resolveGateRequirement(nextTier);
@@ -229,51 +219,36 @@ public class MemberRatingProgressService {
 
     private Integer resolveSkillThreshold(RatingTier tier) {
         return switch (tier) {
-            case BRONZE_5 -> 900;
-            case BRONZE_4 -> 1060;
-            case BRONZE_3 -> 1120;
-            case BRONZE_2 -> 1180;
-            case BRONZE_1 -> 1240;
-            case SILVER_5 -> 1300;
-            case SILVER_4 -> 1360;
-            case SILVER_3 -> 1420;
-            case SILVER_2 -> 1480;
-            case SILVER_1 -> 1540;
-            case GOLD_5 -> 1600;
-            case GOLD_4 -> 1660;
-            case GOLD_3 -> 1720;
-            case GOLD_2 -> 1780;
-            case GOLD_1 -> 1840;
-            case PLATINUM_5 -> 1900;
-            case PLATINUM_4 -> 1960;
-            case PLATINUM_3 -> 2020;
-            case PLATINUM_2 -> 2080;
-            case PLATINUM_1 -> 2140;
-            case DIAMOND_5 -> 2200;
-            case DIAMOND_4 -> 2260;
-            case DIAMOND_3 -> 2320;
-            case DIAMOND_2 -> 2380;
-            case DIAMOND_1 -> 2440;
-            case MASTER_4 -> 2500;
-            case MASTER_3 -> 2575;
-            case MASTER_2 -> 2650;
-            case MASTER_1 -> 2725;
+            case BRONZE_5 -> 0;
+            case BRONZE_4 -> 60;
+            case BRONZE_3 -> 120;
+            case BRONZE_2 -> 180;
+            case BRONZE_1 -> 240;
+            case SILVER_5 -> 300;
+            case SILVER_4 -> 360;
+            case SILVER_3 -> 420;
+            case SILVER_2 -> 480;
+            case SILVER_1 -> 540;
+            case GOLD_5 -> 600;
+            case GOLD_4 -> 660;
+            case GOLD_3 -> 720;
+            case GOLD_2 -> 780;
+            case GOLD_1 -> 840;
+            case PLATINUM_5 -> 900;
+            case PLATINUM_4 -> 960;
+            case PLATINUM_3 -> 1020;
+            case PLATINUM_2 -> 1080;
+            case PLATINUM_1 -> 1140;
+            case DIAMOND_5 -> 1200;
+            case DIAMOND_4 -> 1260;
+            case DIAMOND_3 -> 1320;
+            case DIAMOND_2 -> 1380;
+            case DIAMOND_1 -> 1440;
+            case MASTER_4 -> 1500;
+            case MASTER_3 -> 1575;
+            case MASTER_2 -> 1650;
+            case MASTER_1 -> 1725;
             case GOD -> null;
-        };
-    }
-
-    private Integer resolveHardSkillThreshold(RatingTier tier) {
-        return switch (tier) {
-            case DIAMOND_5 -> 2200;
-            case DIAMOND_4 -> 2260;
-            case DIAMOND_3 -> 2320;
-            case DIAMOND_2 -> 2380;
-            case DIAMOND_1 -> 2440;
-            case MASTER_4 -> 2500;
-            case MASTER_3 -> 2575;
-            case MASTER_2 -> 2650;
-            case MASTER_1 -> 2725;
-            default -> null;
         };
     }
 
@@ -301,7 +276,7 @@ public class MemberRatingProgressService {
 
     private Integer resolveMasterSeatRank(Long memberId) {
         List<MemberRatingProfile> candidates =
-                memberRatingProfileRepository.findAllByTierInOrderByHardBattleRatingDescBattleRatingDescMemberIdAsc(
+                memberRatingProfileRepository.findAllByTierInOrderByBattleRatingDescFirstSolveScoreDescMemberIdAsc(
                         List.of(RatingTier.GOD, RatingTier.MASTER_1));
         if (candidates == null || candidates.isEmpty()) {
             return null;

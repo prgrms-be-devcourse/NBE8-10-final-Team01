@@ -8,7 +8,6 @@ public record RatingProgressResponse(CurrentProgress current, NextTierProgress n
             String displayTier,
             String tier,
             int battleRating,
-            int hardBattleRating,
             int activityPoint,
             int battleMatchCount,
             int firstSolvedProblemCount,
