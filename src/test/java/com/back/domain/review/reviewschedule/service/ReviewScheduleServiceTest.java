@@ -20,6 +20,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.back.domain.member.member.entity.Member;
 import com.back.domain.problem.problem.entity.Problem;
+import com.back.domain.problem.problem.enums.DifficultyLevel;
 import com.back.domain.review.reviewschedule.dto.ReviewScheduleResponse;
 import com.back.domain.review.reviewschedule.dto.TodayReviewResponse;
 import com.back.domain.review.reviewschedule.entity.ReviewSchedule;
@@ -108,29 +109,31 @@ class ReviewScheduleServiceTest {
     @DisplayName("오늘 복습할 스케줄이 있으면 ReviewItem 목록을 반환한다")
     void getTodayReviews_returnsItems() {
         Problem p1 = mock(Problem.class);
-        Problem p2 = mock(Problem.class);
         when(p1.getId()).thenReturn(10L);
         when(p1.getTitle()).thenReturn("문제A");
-        when(p2.getId()).thenReturn(20L);
-        when(p2.getTitle()).thenReturn("문제B");
+        when(p1.getDifficulty()).thenReturn(DifficultyLevel.EASY);
+        when(p1.getDifficultyRating()).thenReturn(800);
+        when(p1.getTimeLimitMs()).thenReturn(1000L);
+        when(p1.getMemoryLimitMb()).thenReturn(256L);
 
         Member m1 = mock(Member.class);
-        Member m2 = mock(Member.class);
         ReviewSchedule s1 = ReviewSchedule.of(m1, p1, solvedAt, solvedAt.plusDays(3));
-        ReviewSchedule s2 = ReviewSchedule.of(m2, p2, solvedAt, solvedAt.plusDays(3));
-        s2.updateOnAc(solvedAt, solvedAt.plusDays(7), true);
 
-        when(reviewScheduleRepository.findTodayReviews(any(), any())).thenReturn(List.of(s1, s2));
+        when(reviewScheduleRepository.findTodayReviews(any(), any())).thenReturn(List.of(s1));
 
         TodayReviewResponse response = reviewScheduleService.getTodayReviews(99L);
 
-        assertThat(response.totalCount()).isEqualTo(2);
-        assertThat(response.reviews()).hasSize(2);
-        assertThat(response.reviews().get(0).problemId()).isEqualTo(10L);
-        assertThat(response.reviews().get(0).problemTitle()).isEqualTo("문제A");
-        assertThat(response.reviews().get(0).reviewCount()).isEqualTo(1);
-        assertThat(response.reviews().get(1).problemId()).isEqualTo(20L);
-        assertThat(response.reviews().get(1).reviewCount()).isEqualTo(2);
+        assertThat(response.totalCount()).isEqualTo(1);
+        assertThat(response.reviews()).hasSize(1);
+
+        TodayReviewResponse.ReviewItem item = response.reviews().get(0);
+        assertThat(item.problemId()).isEqualTo(10L);
+        assertThat(item.problemTitle()).isEqualTo("문제A");
+        assertThat(item.difficulty()).isEqualTo(DifficultyLevel.EASY);
+        assertThat(item.difficultyRating()).isEqualTo(800);
+        assertThat(item.timeLimitMs()).isEqualTo(1000L);
+        assertThat(item.memoryLimitMb()).isEqualTo(256L);
+        assertThat(item.reviewCount()).isEqualTo(1);
     }
 
     @Test
