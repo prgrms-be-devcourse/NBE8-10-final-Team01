@@ -1,6 +1,11 @@
 package com.back.domain.member.member.controller;
 
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
 import com.back.domain.battle.result.dto.MyBattleResultsResponse;
 import com.back.domain.battle.result.service.BattleResultService;
@@ -9,9 +14,11 @@ import com.back.domain.member.member.dto.LoginRequest;
 import com.back.domain.member.member.dto.LoginTokens;
 import com.back.domain.member.member.dto.MyInfoResponse;
 import com.back.domain.member.member.dto.RatingProgressResponse;
+import com.back.domain.member.member.dto.SolveHeatmapResponse;
 import com.back.domain.member.member.entity.Member;
 import com.back.domain.member.member.service.MemberRatingProgressService;
 import com.back.domain.member.member.service.MemberService;
+import com.back.domain.member.member.service.MemberSolveHeatmapService;
 import com.back.global.exception.ServiceException;
 import com.back.global.jwt.RefreshTokenService;
 import com.back.global.rq.Rq;
@@ -26,6 +33,7 @@ import lombok.RequiredArgsConstructor;
 public class MemberController {
     private final MemberService memberService;
     private final MemberRatingProgressService memberRatingProgressService;
+    private final MemberSolveHeatmapService memberSolveHeatmapService;
     private final BattleResultService battleResultService;
     private final RefreshTokenService refreshTokenService;
     private final Rq rq;
@@ -104,5 +112,16 @@ public class MemberController {
         }
 
         return memberRatingProgressService.getMyRatingProgress(actor.getId());
+    }
+
+    // 내 풀이 잔디 조회
+    @GetMapping("/me/solve-heatmap")
+    public RsData<SolveHeatmapResponse> getMySolveHeatmap(@RequestParam(required = false) Integer year) {
+        Member actor = rq.getActor();
+        if (actor == null || actor.getId() == null) {
+            throw new ServiceException("MEMBER_401", "로그인이 필요합니다");
+        }
+
+        return memberSolveHeatmapService.getMySolveHeatmap(actor.getId(), year);
     }
 }
