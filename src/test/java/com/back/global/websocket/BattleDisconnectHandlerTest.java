@@ -2,16 +2,21 @@ package com.back.global.websocket;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.Collections;
+import java.util.Map;
 import java.util.Optional;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedStatic;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.socket.messaging.SessionDisconnectEvent;
 
 import com.back.domain.battle.battleparticipant.entity.BattleParticipant;
@@ -20,14 +25,16 @@ import com.back.domain.battle.battleparticipant.repository.BattleParticipantRepo
 import com.back.domain.battle.battleroom.entity.BattleRoom;
 import com.back.domain.battle.battleroom.entity.BattleRoomStatus;
 import com.back.global.security.SecurityUser;
+import com.back.global.websocket.pubsub.WebSocketMessagePublisher;
 
 class BattleDisconnectHandlerTest {
 
     private final BattleParticipantRepository battleParticipantRepository = mock(BattleParticipantRepository.class);
     private final BattleReconnectStore reconnectStore = mock(BattleReconnectStore.class);
+    private final WebSocketMessagePublisher publisher = mock(WebSocketMessagePublisher.class);
 
     private final BattleDisconnectHandler sut =
-            new BattleDisconnectHandler(battleParticipantRepository, reconnectStore);
+            new BattleDisconnectHandler(battleParticipantRepository, reconnectStore, publisher);
 
     private static final Long MEMBER_ID = 10L;
     private static final Long ROOM_ID = 1L;
@@ -48,12 +55,22 @@ class BattleDisconnectHandlerTest {
                         MEMBER_ID, BattleParticipantStatus.PLAYING, BattleRoomStatus.PLAYING))
                 .thenReturn(Optional.of(participant));
 
-        sut.handleDisconnect(event);
+        withAfterCommit(() -> sut.handleDisconnect(event));
 
         com.back.domain.battle.battleparticipant.entity.BattleParticipantStatus status = participant.getStatus();
         org.assertj.core.api.Assertions.assertThat(status).isEqualTo(BattleParticipantStatus.ABANDONED);
         verify(reconnectStore).startGracePeriod(MEMBER_ID);
         verify(battleParticipantRepository).save(participant);
+        verify(publisher)
+                .publish(
+                        "/topic/room/" + ROOM_ID,
+                        Map.of(
+                                "type",
+                                "PARTICIPANT_STATUS_CHANGED",
+                                "userId",
+                                MEMBER_ID,
+                                "status",
+                                BattleParticipantStatus.ABANDONED.name()));
     }
 
     @Test
@@ -63,7 +80,7 @@ class BattleDisconnectHandlerTest {
         when(event.getUser()).thenReturn(null);
         when(event.getSessionId()).thenReturn("unauthenticated-session");
 
-        sut.handleDisconnect(event);
+        withAfterCommit(() -> sut.handleDisconnect(event));
 
         verify(battleParticipantRepository, never()).findPlayingParticipantByMemberId(any(), any(), any());
         verify(reconnectStore, never()).startGracePeriod(any());
@@ -96,5 +113,17 @@ class BattleDisconnectHandlerTest {
         SessionDisconnectEvent event = mock(SessionDisconnectEvent.class);
         when(event.getUser()).thenReturn(auth);
         return event;
+    }
+
+    private void withAfterCommit(Runnable action) {
+        try (MockedStatic<TransactionSynchronizationManager> tsm =
+                mockStatic(TransactionSynchronizationManager.class)) {
+            tsm.when(() -> TransactionSynchronizationManager.registerSynchronization(any()))
+                    .thenAnswer(inv -> {
+                        inv.<TransactionSynchronization>getArgument(0).afterCommit();
+                        return null;
+                    });
+            action.run();
+        }
     }
 }

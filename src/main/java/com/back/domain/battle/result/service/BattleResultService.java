@@ -60,6 +60,7 @@ public class BattleResultService {
 
     @Transactional
     public void settle(Long roomId) {
+        log.info("settle called roomId={}", roomId);
 
         // 1. BattleRoom 조회 + 중복 정산 방지
         BattleRoom room =
@@ -100,11 +101,15 @@ public class BattleResultService {
         int totalParticipants = sorted.size();
         for (BattleParticipant participant : sorted) {
             boolean isAC = participant.getStatus() == BattleParticipantStatus.SOLVED;
+            boolean isDisconnected = participant.getStatus() == BattleParticipantStatus.ABANDONED
+                    || participant.getStatus() == BattleParticipantStatus.QUIT;
             long scoreDelta = 0L;
             if (isAC && rank <= SCORE_TABLE.length) {
                 scoreDelta = SCORE_TABLE[rank - 1];
             }
-            if (totalParticipants >= 4 && rank == totalParticipants) {
+            if (isDisconnected) {
+                scoreDelta = LAST_PLACE_PENALTY;
+            } else if (totalParticipants >= 4 && rank == totalParticipants) {
                 scoreDelta = LAST_PLACE_PENALTY;
             }
 
@@ -146,6 +151,24 @@ public class BattleResultService {
 
                 // 방 채널 브로드캐스트 (방 내 구독자 및 관전자)
                 try {
+                    for (BattleParticipant p : participants) {
+                        if (p.getStatus() != BattleParticipantStatus.TIMEOUT) {
+                            continue;
+                        }
+                        try {
+                            publisher.publish(
+                                    "/topic/room/" + roomId,
+                                    Map.of(
+                                            "type", "PARTICIPANT_STATUS_CHANGED",
+                                            "userId", p.getMember().getId(),
+                                            "status", BattleParticipantStatus.TIMEOUT.name()));
+                        } catch (Exception inner) {
+                            log.error(
+                                    "Failed to publish PARTICIPANT_STATUS_CHANGED(TIMEOUT) WebSocket roomId={}",
+                                    roomId,
+                                    inner);
+                        }
+                    }
                     publisher.publish("/topic/room/" + roomId, Map.of("type", "BATTLE_FINISHED"));
                 } catch (Exception e) {
                     log.error("BATTLE_FINISHED WebSocket 전송 실패 roomId={}", roomId, e);
@@ -178,6 +201,7 @@ public class BattleResultService {
                 }
             }
         });
+        log.info("settle end roomId={}", roomId);
     }
 
     @Transactional(readOnly = true)

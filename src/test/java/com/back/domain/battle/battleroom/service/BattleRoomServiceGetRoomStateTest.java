@@ -12,13 +12,13 @@ import java.util.Optional;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.ApplicationEventPublisher;
 
 import com.back.domain.battle.battleparticipant.repository.BattleParticipantRepository;
 import com.back.domain.battle.battleroom.dto.BattleRoomStateResponse;
 import com.back.domain.battle.battleroom.entity.BattleRoom;
 import com.back.domain.battle.battleroom.entity.BattleRoomStatus;
 import com.back.domain.battle.battleroom.repository.BattleRoomRepository;
-import com.back.domain.battle.result.service.BattleResultService;
 import com.back.domain.member.member.repository.MemberRepository;
 import com.back.domain.problem.problem.entity.Problem;
 import com.back.domain.problem.problem.repository.ProblemRepository;
@@ -43,7 +43,7 @@ class BattleRoomServiceGetRoomStateTest {
             battleCodeStore,
             mock(BattleReconnectStore.class),
             mock(BattleTimerStore.class),
-            mock(BattleResultService.class));
+            mock(ApplicationEventPublisher.class));
 
     private static final Long ROOM_ID = 1L;
     private static final Long MEMBER_ID = 10L;

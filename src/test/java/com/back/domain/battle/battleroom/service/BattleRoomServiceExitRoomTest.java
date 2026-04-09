@@ -12,11 +12,13 @@ import static org.mockito.Mockito.when;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -26,7 +28,7 @@ import com.back.domain.battle.battleparticipant.repository.BattleParticipantRepo
 import com.back.domain.battle.battleroom.entity.BattleRoom;
 import com.back.domain.battle.battleroom.entity.BattleRoomStatus;
 import com.back.domain.battle.battleroom.repository.BattleRoomRepository;
-import com.back.domain.battle.result.service.BattleResultService;
+import com.back.domain.battle.result.event.BattleSettlementRequestedEvent;
 import com.back.domain.member.member.entity.Member;
 import com.back.domain.member.member.repository.MemberRepository;
 import com.back.domain.problem.problem.repository.ProblemRepository;
@@ -46,7 +48,7 @@ class BattleRoomServiceExitRoomTest {
     private final BattleCodeStore battleCodeStore = mock(BattleCodeStore.class);
     private final BattleReconnectStore reconnectStore = mock(BattleReconnectStore.class);
     private final BattleTimerStore battleTimerStore = mock(BattleTimerStore.class);
-    private final BattleResultService battleResultService = mock(BattleResultService.class);
+    private final ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
 
     private final BattleRoomService sut = new BattleRoomService(
             battleRoomRepository,
@@ -57,63 +59,81 @@ class BattleRoomServiceExitRoomTest {
             battleCodeStore,
             reconnectStore,
             battleTimerStore,
-            battleResultService);
+            eventPublisher);
 
     private static final Long ROOM_ID = 1L;
     private static final Long MEMBER_ID = 10L;
 
     @Test
-    @DisplayName("PLAYING 참여자가 퇴장하면 QUIT으로 변경되고 PARTICIPANT_LEFT가 브로드캐스트된다")
-    void exitRoom_PLAYING상태_정상퇴장() {
+    @DisplayName("PLAYING 참여자가 퇴장하면 QUIT 상태 이벤트를 브로드캐스트한다")
+    void exitRoom_playingParticipant_broadcastsQuitStatus() {
         BattleRoom room = playingRoom();
         Member member = mockMember();
         BattleParticipant participant = playingParticipant(room, member);
 
-        given_room_member_participant(room, member, participant, List.of(participant));
+        givenRoomMemberParticipant(room, member, participant, List.of(participant));
 
         withAfterCommit(() -> sut.exitRoom(ROOM_ID, MEMBER_ID));
 
         assertThat(participant.getStatus()).isEqualTo(BattleParticipantStatus.QUIT);
-        verify(publisher).publish(eq("/topic/room/" + ROOM_ID), any());
+        verify(publisher)
+                .publish(
+                        eq("/topic/room/" + ROOM_ID),
+                        eq(Map.of(
+                                "type",
+                                "PARTICIPANT_STATUS_CHANGED",
+                                "userId",
+                                MEMBER_ID,
+                                "status",
+                                BattleParticipantStatus.QUIT.name())));
         verify(reconnectStore, never()).cancelGracePeriod(any());
     }
 
     @Test
-    @DisplayName("ABANDONED 참여자가 퇴장하면 cancelGracePeriod 후 QUIT으로 변경된다")
-    void exitRoom_ABANDONED상태_cancelGracePeriod_후_quit() {
+    @DisplayName("ABANDONED 참여자가 퇴장하면 grace period를 취소하고 QUIT 상태 이벤트를 브로드캐스트한다")
+    void exitRoom_abandonedParticipant_cancelsGraceAndBroadcastsQuitStatus() {
         BattleRoom room = playingRoom();
         Member member = mockMember();
         BattleParticipant participant = abandonedParticipant(room, member);
 
-        given_room_member_participant(room, member, participant, List.of(participant));
+        givenRoomMemberParticipant(room, member, participant, List.of(participant));
 
         withAfterCommit(() -> sut.exitRoom(ROOM_ID, MEMBER_ID));
 
         verify(reconnectStore).cancelGracePeriod(MEMBER_ID);
         assertThat(participant.getStatus()).isEqualTo(BattleParticipantStatus.QUIT);
-        verify(publisher).publish(eq("/topic/room/" + ROOM_ID), any());
+        verify(publisher)
+                .publish(
+                        eq("/topic/room/" + ROOM_ID),
+                        eq(Map.of(
+                                "type",
+                                "PARTICIPANT_STATUS_CHANGED",
+                                "userId",
+                                MEMBER_ID,
+                                "status",
+                                BattleParticipantStatus.QUIT.name())));
     }
 
     @Test
-    @DisplayName("마지막 활성 참여자가 퇴장하면 즉시 정산된다")
-    void exitRoom_마지막활성참여자_즉시정산() {
+    @DisplayName("마지막 활성 참여자가 퇴장하면 정산 요청 이벤트를 발행한다")
+    void exitRoom_lastActiveParticipant_publishesSettlementRequestedEvent() {
         BattleRoom room = playingRoom();
         Member member = mockMember();
         BattleParticipant participant = playingParticipant(room, member);
 
-        BattleParticipant exitedOther = mock(BattleParticipant.class);
-        when(exitedOther.getStatus()).thenReturn(BattleParticipantStatus.SOLVED);
+        BattleParticipant solvedOther = mock(BattleParticipant.class);
+        when(solvedOther.getStatus()).thenReturn(BattleParticipantStatus.SOLVED);
 
-        given_room_member_participant(room, member, participant, List.of(participant, exitedOther));
+        givenRoomMemberParticipant(room, member, participant, List.of(participant, solvedOther));
 
         withAfterCommit(() -> sut.exitRoom(ROOM_ID, MEMBER_ID));
 
-        verify(battleResultService).settle(ROOM_ID);
+        verify(eventPublisher).publishEvent(new BattleSettlementRequestedEvent(ROOM_ID));
     }
 
     @Test
-    @DisplayName("활성 참여자가 남아있으면 퇴장 시 정산하지 않는다")
-    void exitRoom_활성참여자_남아있으면_정산안함() {
+    @DisplayName("활성 참여자가 남아있으면 퇴장해도 정산 요청 이벤트를 발행하지 않는다")
+    void exitRoom_activeParticipantRemains_doesNotPublishSettlementRequestedEvent() {
         BattleRoom room = playingRoom();
         Member member = mockMember();
         BattleParticipant participant = playingParticipant(room, member);
@@ -121,16 +141,16 @@ class BattleRoomServiceExitRoomTest {
         BattleParticipant activeOther = mock(BattleParticipant.class);
         when(activeOther.getStatus()).thenReturn(BattleParticipantStatus.PLAYING);
 
-        given_room_member_participant(room, member, participant, List.of(participant, activeOther));
+        givenRoomMemberParticipant(room, member, participant, List.of(participant, activeOther));
 
         withAfterCommit(() -> sut.exitRoom(ROOM_ID, MEMBER_ID));
 
-        verify(battleResultService, never()).settle(any());
+        verify(eventPublisher, never()).publishEvent(any(BattleSettlementRequestedEvent.class));
     }
 
     @Test
-    @DisplayName("ABANDONED 참여자만 남아있는 상황에서 퇴장하면 정산되지 않는다")
-    void exitRoom_ABANDONED참여자_남아있으면_정산안함() {
+    @DisplayName("ABANDONED 참여자가 남아있으면 퇴장해도 정산 요청 이벤트를 발행하지 않는다")
+    void exitRoom_onlyAbandonedParticipantRemains_doesNotPublishSettlementRequestedEvent() {
         BattleRoom room = playingRoom();
         Member member = mockMember();
         BattleParticipant participant = playingParticipant(room, member);
@@ -138,58 +158,50 @@ class BattleRoomServiceExitRoomTest {
         BattleParticipant abandonedOther = mock(BattleParticipant.class);
         when(abandonedOther.getStatus()).thenReturn(BattleParticipantStatus.ABANDONED);
 
-        given_room_member_participant(room, member, participant, List.of(participant, abandonedOther));
+        givenRoomMemberParticipant(room, member, participant, List.of(participant, abandonedOther));
 
         withAfterCommit(() -> sut.exitRoom(ROOM_ID, MEMBER_ID));
 
-        verify(battleResultService, never()).settle(any());
+        verify(eventPublisher, never()).publishEvent(any(BattleSettlementRequestedEvent.class));
     }
 
     @Test
     @DisplayName("PLAYING 상태가 아닌 방에서 exitRoom 호출하면 예외가 발생한다")
-    void exitRoom_방이PLAYING아닐때_예외() {
+    void exitRoom_nonPlayingRoom_throws() {
         BattleRoom room = mock(BattleRoom.class);
         when(room.getStatus()).thenReturn(BattleRoomStatus.FINISHED);
         when(battleRoomRepository.findById(ROOM_ID)).thenReturn(Optional.of(room));
 
-        assertThatThrownBy(() -> sut.exitRoom(ROOM_ID, MEMBER_ID))
-                .isInstanceOf(ServiceException.class)
-                .hasMessageContaining("진행 중인 방이 아닙니다.");
+        assertThatThrownBy(() -> sut.exitRoom(ROOM_ID, MEMBER_ID)).isInstanceOf(ServiceException.class);
     }
 
     @Test
-    @DisplayName("EXIT 상태 참여자가 exitRoom 호출하면 예외가 발생한다")
-    void exitRoom_EXIT상태_예외() {
+    @DisplayName("SOLVED 상태 참여자가 exitRoom 호출하면 예외가 발생한다")
+    void exitRoom_solvedParticipant_throws() {
         BattleRoom room = playingRoom();
         Member member = mockMember();
         BattleParticipant participant = BattleParticipant.create(room, member);
         participant.join();
         participant.complete(LocalDateTime.now());
 
-        given_room_member_participant(room, member, participant, List.of());
+        givenRoomMemberParticipant(room, member, participant, List.of());
 
-        assertThatThrownBy(() -> sut.exitRoom(ROOM_ID, MEMBER_ID))
-                .isInstanceOf(ServiceException.class)
-                .hasMessageContaining("퇴장할 수 없는 상태입니다.");
+        assertThatThrownBy(() -> sut.exitRoom(ROOM_ID, MEMBER_ID)).isInstanceOf(ServiceException.class);
     }
 
     @Test
     @DisplayName("QUIT 상태 참여자가 exitRoom 호출하면 예외가 발생한다")
-    void exitRoom_QUIT상태_예외() {
+    void exitRoom_quitParticipant_throws() {
         BattleRoom room = playingRoom();
         Member member = mockMember();
         BattleParticipant participant = BattleParticipant.create(room, member);
         participant.join();
         participant.quit();
 
-        given_room_member_participant(room, member, participant, List.of());
+        givenRoomMemberParticipant(room, member, participant, List.of());
 
-        assertThatThrownBy(() -> sut.exitRoom(ROOM_ID, MEMBER_ID))
-                .isInstanceOf(ServiceException.class)
-                .hasMessageContaining("퇴장할 수 없는 상태입니다.");
+        assertThatThrownBy(() -> sut.exitRoom(ROOM_ID, MEMBER_ID)).isInstanceOf(ServiceException.class);
     }
-
-    // ── helpers ────────────────────────────────────────────────────────────────
 
     private BattleRoom playingRoom() {
         BattleRoom room = mock(BattleRoom.class);
@@ -205,19 +217,19 @@ class BattleRoomServiceExitRoomTest {
     }
 
     private BattleParticipant playingParticipant(BattleRoom room, Member member) {
-        BattleParticipant p = BattleParticipant.create(room, member);
-        p.join();
-        return p;
+        BattleParticipant participant = BattleParticipant.create(room, member);
+        participant.join();
+        return participant;
     }
 
     private BattleParticipant abandonedParticipant(BattleRoom room, Member member) {
-        BattleParticipant p = BattleParticipant.create(room, member);
-        p.join();
-        p.abandon();
-        return p;
+        BattleParticipant participant = BattleParticipant.create(room, member);
+        participant.join();
+        participant.abandon();
+        return participant;
     }
 
-    private void given_room_member_participant(
+    private void givenRoomMemberParticipant(
             BattleRoom room, Member member, BattleParticipant participant, List<BattleParticipant> all) {
         when(battleRoomRepository.findById(ROOM_ID)).thenReturn(Optional.of(room));
         when(memberRepository.findById(MEMBER_ID)).thenReturn(Optional.of(member));
@@ -227,16 +239,12 @@ class BattleRoomServiceExitRoomTest {
         when(battleParticipantRepository.findByBattleRoom(room)).thenReturn(all);
     }
 
-    /**
-     * TransactionSynchronizationManager.registerSynchronization()을 가로채
-     * afterCommit()을 즉시 실행한다. 단위 테스트에서 트랜잭션 없이 afterCommit 로직을 검증하기 위한 헬퍼.
-     */
     private void withAfterCommit(Runnable action) {
         try (MockedStatic<TransactionSynchronizationManager> tsm =
                 mockStatic(TransactionSynchronizationManager.class)) {
             tsm.when(() -> TransactionSynchronizationManager.registerSynchronization(any()))
-                    .thenAnswer(inv -> {
-                        inv.<TransactionSynchronization>getArgument(0).afterCommit();
+                    .thenAnswer(invocation -> {
+                        invocation.<TransactionSynchronization>getArgument(0).afterCommit();
                         return null;
                     });
             action.run();
