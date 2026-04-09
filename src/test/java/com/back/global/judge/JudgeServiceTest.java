@@ -9,7 +9,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -17,14 +16,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
-import com.back.domain.battle.battleparticipant.entity.BattleParticipant;
-import com.back.domain.battle.battleparticipant.entity.BattleParticipantStatus;
-import com.back.domain.battle.battleparticipant.repository.BattleParticipantRepository;
 import com.back.domain.battle.battleroom.entity.BattleRoom;
-import com.back.domain.battle.battleroom.repository.BattleRoomRepository;
-import com.back.domain.battle.result.service.BattleResultService;
-import com.back.domain.member.member.entity.Member;
-import com.back.domain.member.member.repository.MemberRepository;
 import com.back.domain.problem.submission.entity.Submission;
 import com.back.domain.problem.submission.entity.SubmissionResult;
 import com.back.domain.problem.submission.repository.SubmissionRepository;
@@ -32,48 +24,28 @@ import com.back.domain.problem.testcase.entity.TestCase;
 import com.back.global.judge.dto.Judge0SubmitResponse;
 import com.back.global.judge.dto.Judge0SubmitResponse.Status;
 import com.back.global.judge.event.JudgeRequestedEvent;
-import com.back.global.websocket.BattleTimerStore;
 import com.back.global.websocket.pubsub.WebSocketMessagePublisher;
 
 class JudgeServiceTest {
-
-    private final Judge0ExecutionService judge0ExecutionService = mock(Judge0ExecutionService.class);
-    private final SubmissionRepository submissionRepository = mock(SubmissionRepository.class);
-    private final BattleParticipantRepository battleParticipantRepository = mock(BattleParticipantRepository.class);
-    private final BattleRoomRepository battleRoomRepository = mock(BattleRoomRepository.class);
-    private final MemberRepository memberRepository = mock(MemberRepository.class);
-    private final BattleResultService battleResultService = mock(BattleResultService.class);
-    private final BattleTimerStore battleTimerStore = mock(BattleTimerStore.class);
-    private final WebSocketMessagePublisher publisher = mock(WebSocketMessagePublisher.class);
-
-    private final JudgeService judgeService = new JudgeService(
-            judge0ExecutionService,
-            submissionRepository,
-            battleParticipantRepository,
-            battleRoomRepository,
-            memberRepository,
-            battleResultService,
-            battleTimerStore,
-            publisher);
 
     private static final Long SUBMISSION_ID = 1L;
     private static final Long ROOM_ID = 10L;
     private static final Long MEMBER_ID = 100L;
 
-    private Submission submission;
-    private BattleRoom room;
-    private Member member;
-    private BattleParticipant participant;
+    private final Judge0ExecutionService judge0ExecutionService = mock(Judge0ExecutionService.class);
+    private final SubmissionRepository submissionRepository = mock(SubmissionRepository.class);
+    private final BattleAcService battleAcService = mock(BattleAcService.class);
+    private final WebSocketMessagePublisher publisher = mock(WebSocketMessagePublisher.class);
 
-    // ── 헬퍼 ──────────────────────────────────────────────────────────────────
+    private final JudgeService judgeService =
+            new JudgeService(judge0ExecutionService, submissionRepository, battleAcService, publisher);
+
+    private Submission submission;
 
     @BeforeEach
     void setUp() {
-        submission = Submission.create(mock(BattleRoom.class), mock(Member.class), "code", "python");
-        room = mock(BattleRoom.class);
-        member = mock(Member.class);
-        participant = mock(BattleParticipant.class);
-
+        submission = Submission.create(
+                mock(BattleRoom.class), mock(com.back.domain.member.member.entity.Member.class), "code", "python");
         when(submissionRepository.findById(SUBMISSION_ID)).thenReturn(Optional.of(submission));
         when(judge0ExecutionService.getLanguageId("python")).thenReturn(71);
     }
@@ -93,30 +65,15 @@ class JudgeServiceTest {
         when(judge0ExecutionService.execute(any())).thenReturn(List.of(responses));
     }
 
-    /** AC 흐름에서 필요한 handleAc() 관련 Mock 설정 */
-    private void stubHandleAc(List<BattleParticipant> allParticipants) {
-        when(battleRoomRepository.findById(ROOM_ID)).thenReturn(Optional.of(room));
-        when(memberRepository.findById(MEMBER_ID)).thenReturn(Optional.of(member));
-        when(battleParticipantRepository.findByBattleRoomAndMember(room, member))
-                .thenReturn(Optional.of(participant));
-        when(battleParticipantRepository.findByBattleRoom(room)).thenReturn(allParticipants);
-    }
-
     private JudgeRequestedEvent event(List<TestCase> testCases) {
         return new JudgeRequestedEvent(SUBMISSION_ID, ROOM_ID, MEMBER_ID, "code", "python", testCases);
     }
-
-    // ── 채점 결과 저장 ─────────────────────────────────────────────────────────
 
     @Test
     @DisplayName("전체 통과 시 submission result가 AC로 저장된다")
     void judge_allPass_savedAsAc() {
         TestCase tc = mockTestCase("1 2", "3");
         stubJudge0(response(3, "3\n"));
-
-        BattleParticipant exitParticipant = mock(BattleParticipant.class);
-        when(exitParticipant.getStatus()).thenReturn(BattleParticipantStatus.SOLVED);
-        stubHandleAc(List.of(exitParticipant));
 
         judgeService.onJudgeRequested(event(List.of(tc)));
 
@@ -185,10 +142,10 @@ class JudgeServiceTest {
     }
 
     @Test
-    @DisplayName("Judge0 타임아웃 시 submission result가 JUDGE_ERROR로 저장된다")
+    @DisplayName("Judge0 응답이 비어있으면 submission result가 JUDGE_ERROR로 저장된다")
     void judge_judge0Timeout_savedAsJudgeError() {
         TestCase tc = mockTestCase("1 2", "3");
-        when(judge0ExecutionService.execute(any())).thenReturn(List.of()); // 타임아웃 → 빈 리스트
+        when(judge0ExecutionService.execute(any())).thenReturn(List.of());
 
         judgeService.onJudgeRequested(event(List.of(tc)));
 
@@ -196,84 +153,40 @@ class JudgeServiceTest {
         verify(submissionRepository).save(submission);
     }
 
-    // ── AC 처리 (handleAc) ────────────────────────────────────────────────────
+    @Test
+    @DisplayName("AC가 아니면 AC 후속 처리 서비스를 호출하지 않는다")
+    void judge_notAc_doesNotCallBattleAcService() {
+        TestCase tc = mockTestCase("1 2", "3");
+        stubJudge0(response(4, "5\n"));
+
+        judgeService.onJudgeRequested(event(List.of(tc)));
+
+        verify(battleAcService, never()).handleAc(any(), any());
+    }
 
     @Test
-    @DisplayName("AC이면 participant가 complete() 처리되고 저장된다")
-    void judge_ac_participantCompleted() {
+    @DisplayName("AC면 AC 후속 처리 서비스를 호출한다")
+    void judge_ac_callsBattleAcService() {
         TestCase tc = mockTestCase("1 2", "3");
         stubJudge0(response(3, "3\n"));
 
-        BattleParticipant exitParticipant = mock(BattleParticipant.class);
-        when(exitParticipant.getStatus()).thenReturn(BattleParticipantStatus.SOLVED);
-        stubHandleAc(List.of(exitParticipant));
-
         judgeService.onJudgeRequested(event(List.of(tc)));
 
-        verify(participant).complete(any());
-        verify(battleParticipantRepository).save(participant);
+        verify(battleAcService).handleAc(ROOM_ID, MEMBER_ID);
     }
 
     @Test
-    @DisplayName("AC가 아니면 participant 상태 변경이 없다")
-    void judge_notAc_participantNotChanged() {
-        TestCase tc = mockTestCase("1 2", "3");
-        stubJudge0(response(4, "5\n")); // WA
-
-        judgeService.onJudgeRequested(event(List.of(tc)));
-
-        verify(battleParticipantRepository, never()).save(any());
-        verify(battleResultService, never()).settle(any());
-    }
-
-    @Test
-    @DisplayName("AC이고 전원 완료 시 배틀 정산이 호출된다")
-    void judge_ac_allFinished_settlesCalled() {
-        TestCase tc = mockTestCase("1 2", "3");
-        stubJudge0(response(3, "3\n"));
-
-        BattleParticipant p1 = mock(BattleParticipant.class);
-        BattleParticipant p2 = mock(BattleParticipant.class);
-        when(p1.getStatus()).thenReturn(BattleParticipantStatus.SOLVED);
-        when(p2.getStatus()).thenReturn(BattleParticipantStatus.SOLVED);
-        stubHandleAc(List.of(p1, p2));
-
-        judgeService.onJudgeRequested(event(List.of(tc)));
-
-        verify(battleResultService).settle(ROOM_ID);
-    }
-
-    @Test
-    @DisplayName("AC이지만 아직 남은 참여자가 있으면 배틀 정산이 호출되지 않는다")
-    void judge_ac_notAllFinished_settlesNotCalled() {
-        TestCase tc = mockTestCase("1 2", "3");
-        stubJudge0(response(3, "3\n"));
-
-        BattleParticipant p1 = mock(BattleParticipant.class);
-        BattleParticipant p2 = mock(BattleParticipant.class);
-        when(p1.getStatus()).thenReturn(BattleParticipantStatus.SOLVED);
-        when(p2.getStatus()).thenReturn(BattleParticipantStatus.PLAYING);
-        stubHandleAc(List.of(p1, p2));
-
-        judgeService.onJudgeRequested(event(List.of(tc)));
-
-        verify(battleResultService, never()).settle(any());
-    }
-
-    // ── WebSocket 브로드캐스트 ─────────────────────────────────────────────────
-
-    @Test
-    @DisplayName("채점 완료 후 SUBMISSION 타입으로 WebSocket 브로드캐스트된다")
+    @DisplayName("채점 완료 후 SUBMISSION 타입으로 WebSocket 브로드캐스트한다")
     void judge_broadcastsSubmissionResult() {
         TestCase tc = mockTestCase("1 2", "3");
-        stubJudge0(response(4, "5\n")); // WA
+        stubJudge0(response(4, "5\n"));
 
         judgeService.onJudgeRequested(event(List.of(tc)));
 
-        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        ArgumentCaptor<java.util.Map<String, Object>> captor = ArgumentCaptor.forClass(java.util.Map.class);
         verify(publisher).publish(eq("/topic/room/" + ROOM_ID), captor.capture());
 
-        Map<String, Object> message = captor.getValue();
+        java.util.Map<String, Object> message = captor.getValue();
         assertThat(message.get("type")).isEqualTo("SUBMISSION");
         assertThat(message.get("userId")).isEqualTo(MEMBER_ID);
         assertThat(message.get("result")).isEqualTo("WA");

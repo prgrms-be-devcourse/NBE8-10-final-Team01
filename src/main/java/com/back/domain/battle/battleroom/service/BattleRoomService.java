@@ -80,6 +80,8 @@ public class BattleRoomService {
 
     @Transactional
     public JoinRoomResponse joinRoom(Long roomId, Long memberId) {
+        boolean publishPlaying = false;
+        String battleTimerEnd = null;
 
         // 1. BattleRoom 조회 (비관적 락으로 동시 joinRoom 직렬화)
         BattleRoom room = battleRoomRepository
@@ -110,6 +112,7 @@ public class BattleRoomService {
             }
             participant.join();
             battleParticipantRepository.save(participant);
+            publishPlaying = true;
         } else {
             throw new IllegalStateException("입장할 수 없는 참여자 상태입니다. 현재 상태: " + participant.getStatus());
         }
@@ -124,7 +127,8 @@ public class BattleRoomService {
             if (allPlaying) {
                 room.startBattle(Duration.ofMinutes(30));
                 battleRoomRepository.save(room);
-                String timerEnd = room.getTimerEnd().toString();
+                battleTimerEnd = room.getTimerEnd().toString();
+                String timerEnd = battleTimerEnd;
                 TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                     @Override
                     public void afterCommit() {
@@ -147,7 +151,30 @@ public class BattleRoomService {
             }
         }
 
-        return JoinRoomResponse.from(room);
+        if (publishPlaying) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    try {
+                        publisher.publish(
+                                "/topic/room/" + roomId,
+                                Map.of(
+                                        "type",
+                                        "PARTICIPANT_STATUS_CHANGED",
+                                        "userId",
+                                        memberId,
+                                        "status",
+                                        BattleParticipantStatus.PLAYING.name()));
+                    } catch (Exception e) {
+                        log.error(
+                                "Failed to publish PARTICIPANT_STATUS_CHANGED(PLAYING) WebSocket roomId={}", roomId, e);
+                    }
+                }
+            });
+        }
+
+        List<BattleParticipant> allParticipantsForResponse = battleParticipantRepository.findByBattleRoom(room);
+        return JoinRoomResponse.from(room, allParticipantsForResponse);
     }
 
     @Transactional(readOnly = true)
@@ -194,19 +221,36 @@ public class BattleRoomService {
         boolean noActiveLeft = all.stream()
                 .noneMatch(p -> p.getStatus() == BattleParticipantStatus.PLAYING
                         || p.getStatus() == BattleParticipantStatus.ABANDONED);
+        log.debug("exitRoom activated at exitRoom id={} status={}", roomId, noActiveLeft);
 
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
                 try {
-                    publisher.publish("/topic/room/" + roomId, Map.of("type", "PARTICIPANT_LEFT", "userId", memberId));
+                    log.info(
+                            "exitRoom afterCommit start roomId={}, memberId={}, noActiveLeft={}",
+                            roomId,
+                            memberId,
+                            noActiveLeft);
+                    publisher.publish(
+                            "/topic/room/" + roomId,
+                            Map.of(
+                                    "type",
+                                    "PARTICIPANT_STATUS_CHANGED",
+                                    "userId",
+                                    memberId,
+                                    "status",
+                                    BattleParticipantStatus.QUIT.name()));
                 } catch (Exception e) {
-                    log.error("PARTICIPANT_LEFT WebSocket 전송 실패 roomId={}", roomId, e);
+                    log.error("Failed to publish PARTICIPANT_STATUS_CHANGED(QUIT) WebSocket roomId={}", roomId, e);
                 }
+                log.info("exitRoom afterCommit start roomId={}, noActiveLeft={}", roomId, noActiveLeft);
                 if (noActiveLeft) {
                     try {
+                        log.info("exitRoom immediate settle start roomId={}", roomId);
                         battleTimerStore.cancel(roomId);
                         battleResultService.settle(roomId);
+                        log.info("exitRoom immediate settle done roomId={}", roomId);
                     } catch (OptimisticLockException e) {
                         log.info("settle 낙관적 락 충돌 - 이미 정산 완료됨 roomId={}", roomId);
                     } catch (Exception e) {

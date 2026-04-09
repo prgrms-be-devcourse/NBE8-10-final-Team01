@@ -2,8 +2,12 @@ package com.back.domain.battle.result.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.LocalDateTime;
@@ -12,9 +16,12 @@ import java.util.Optional;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedStatic;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.back.domain.battle.battleparticipant.entity.BattleParticipant;
 import com.back.domain.battle.battleparticipant.entity.BattleParticipantStatus;
@@ -162,5 +169,67 @@ class BattleResultServiceTest {
 
         // then
         assertThat(response).isNull();
+    }
+
+    @Test
+    @DisplayName("정산 시 ABANDONED 참여자는 QUIT과 동일하게 감점된다")
+    void settle_abandonedParticipant_getsPenalty() {
+        BattleRoom room = mock(BattleRoom.class);
+        Problem problem = mock(Problem.class);
+        BattleParticipant participant = mock(BattleParticipant.class);
+        com.back.domain.member.member.entity.Member member = mock(com.back.domain.member.member.entity.Member.class);
+
+        when(battleRoomRepository.findById(1L)).thenReturn(Optional.of(room));
+        when(room.getStatus()).thenReturn(BattleRoomStatus.PLAYING);
+        when(room.getProblem()).thenReturn(problem);
+        when(problem.getDifficultyRating()).thenReturn(1200);
+        when(battleParticipantRepository.findByBattleRoom(room)).thenReturn(List.of(participant));
+        when(participant.getId()).thenReturn(11L);
+        when(participant.getStatus()).thenReturn(BattleParticipantStatus.ABANDONED);
+        when(participant.getMember()).thenReturn(member);
+
+        withAfterCommit(() -> battleResultService.settle(1L));
+
+        verify(participant).applyResult(1, -5L);
+        verify(member).applyScore(-5L);
+        verify(participant, never()).timeout();
+    }
+
+    @Test
+    @DisplayName("정산 시 QUIT 참여자는 감점된다")
+    void settle_quitParticipant_getsPenalty() {
+        BattleRoom room = mock(BattleRoom.class);
+        Problem problem = mock(Problem.class);
+        BattleParticipant participant = mock(BattleParticipant.class);
+        com.back.domain.member.member.entity.Member member = mock(com.back.domain.member.member.entity.Member.class);
+
+        when(battleRoomRepository.findById(2L)).thenReturn(Optional.of(room));
+        when(room.getStatus()).thenReturn(BattleRoomStatus.PLAYING);
+        when(room.getProblem()).thenReturn(problem);
+        when(problem.getDifficultyRating()).thenReturn(1200);
+        when(battleParticipantRepository.findByBattleRoom(room)).thenReturn(List.of(participant));
+        when(participant.getId()).thenReturn(22L);
+        when(participant.getStatus()).thenReturn(BattleParticipantStatus.QUIT);
+        when(participant.getMember()).thenReturn(member);
+
+        withAfterCommit(() -> battleResultService.settle(2L));
+
+        verify(participant).applyResult(1, -5L);
+        verify(member).applyScore(-5L);
+    }
+
+    private void withAfterCommit(Runnable action) {
+        try (MockedStatic<TransactionSynchronizationManager> mocked =
+                mockStatic(TransactionSynchronizationManager.class)) {
+            mocked.when(() -> TransactionSynchronizationManager.registerSynchronization(
+                            any(TransactionSynchronization.class)))
+                    .thenAnswer(invocation -> {
+                        TransactionSynchronization synchronization =
+                                invocation.getArgument(0, TransactionSynchronization.class);
+                        synchronization.afterCommit();
+                        return null;
+                    });
+            action.run();
+        }
     }
 }
