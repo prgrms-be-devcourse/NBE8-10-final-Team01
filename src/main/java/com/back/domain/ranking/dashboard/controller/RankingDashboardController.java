@@ -15,6 +15,7 @@ import lombok.RequiredArgsConstructor;
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/v1/rankings")
+// 로그인 사용자의 메인 홈 대시보드를 조회한다.
 public class RankingDashboardController {
 
     private final RankingDashboardService rankingDashboardService;

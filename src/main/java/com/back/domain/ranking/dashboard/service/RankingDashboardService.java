@@ -26,12 +26,14 @@ import lombok.RequiredArgsConstructor;
 
 @Service
 @RequiredArgsConstructor
+// 메인 홈 대시보드 응답을 조립하고 화면용 계산값을 보정한다.
 public class RankingDashboardService {
 
     private static final int TREND_LIMIT = 7;
     private static final int TOP2_WINDOW_SIZE = 20;
     private static final int NEARBY_RANKING_RADIUS = 2;
 
+    // 대시보드에서 쓰는 티어 컷 기준이다.
     private static final List<TierCut> TIER_CUTS = List.of(
             new TierCut("BRONZE_5", 900),
             new TierCut("BRONZE_4", 1060),
@@ -77,7 +79,8 @@ public class RankingDashboardService {
                 .orElseThrow(() -> new ServiceException("MEMBER_404", "Member not found."));
 
         LocalDateTime now = LocalDateTime.now();
-        String currentTier = displayTier(member.tier(), member.score());
+        long battleRating = member.battleRating();
+        String currentTier = displayTier(member.tier(), battleRating);
         String nextTier = resolveNextTier(currentTier);
         BattleSummary battleSummary = queryRepository.findBattleSummary(memberId, TOP2_WINDOW_SIZE);
 
@@ -88,15 +91,17 @@ public class RankingDashboardService {
                 member.rank(),
                 calculatePercentile(member.rank(), member.totalCount()),
                 member.score(),
+                battleRating,
                 nextTier,
                 battleSummary.battleMatchCount(),
                 battleSummary.top2Rate(),
+                battleSummary.top2SampleSize(),
                 battleSummary.scoreDeltaTotal());
 
         return new RankingDashboardResponse(
                 profile,
-                buildScoreTrend(memberId, member.score(), now),
-                buildGateProgress(memberId, member.score(), nextTier, battleSummary.top2Rate()),
+                buildScoreTrend(memberId, battleRating, now),
+                buildGateProgress(memberId, battleRating, nextTier, battleSummary.top2Rate()),
                 buildNearbyRanking(memberId),
                 buildTierDistribution(currentTier),
                 queryRepository.findTagStats(memberId),
@@ -113,6 +118,7 @@ public class RankingDashboardService {
         List<BattleTrendRow> chronologicalRows = new ArrayList<>(recentRows);
         Collections.reverse(chronologicalRows);
 
+        // 현재 배틀 레이팅에서 최근 delta를 역산해 그래프용 포인트를 재구성한다.
         long recentDeltaSum =
                 chronologicalRows.stream().mapToLong(BattleTrendRow::delta).sum();
         long runningScore = currentScore - recentDeltaSum;
@@ -135,6 +141,7 @@ public class RankingDashboardService {
             Long memberId, long currentScore, String nextTier, int top2Rate) {
         long scoreTarget = nextTier == null || "GOD".equals(nextTier) ? currentScore : resolveTierTarget(nextTier);
         List<RankingDashboardResponse.GateProgress> gates = new ArrayList<>();
+        // SCORE 게이트는 화면 라벨에 맞춰 배틀 레이팅 기준으로 내려준다.
         gates.add(new RankingDashboardResponse.GateProgress(
                 "SCORE", "\uBC30\uD2C0 \uB808\uC774\uD305", currentScore, scoreTarget, ""));
 
@@ -175,8 +182,8 @@ public class RankingDashboardService {
                         row.rank(),
                         row.memberId(),
                         row.nickname(),
-                        displayTier(row.tier(), row.score()),
-                        row.score(),
+                        displayTier(row.tier(), row.battleRating()),
+                        row.battleRating(),
                         row.memberId().equals(memberId)))
                 .toList();
     }
@@ -185,7 +192,7 @@ public class RankingDashboardService {
         List<TierSourceRow> rows = queryRepository.findTierSources();
         long totalCount = rows.size();
         Map<String, Long> tierCounts = new LinkedHashMap<>();
-        rows.forEach(row -> tierCounts.merge(displayTier(row.tier(), row.score()), 1L, Long::sum));
+        rows.forEach(row -> tierCounts.merge(displayTier(row.tier(), row.battleRating()), 1L, Long::sum));
 
         return tierCounts.entrySet().stream()
                 .sorted(Comparator.comparingInt(entry -> tierOrder(entry.getKey())))

@@ -57,9 +57,14 @@ class RankingDashboardControllerTest extends IntegrationTestBase {
         LocalDateTime now = LocalDateTime.now();
         Long rank1 = insertMember("rank1@example.com", "rank1", 1700, "GOLD_4");
         Long rank2 = insertMember("rank2@example.com", "rank2", 1600, "GOLD_5");
-        Long me = insertMember("me@example.com", "me", 1580, "SILVER_1");
-        Long rank4 = insertMember("rank4@example.com", "rank4", 1400, "SILVER_4");
-        Long rank5 = insertMember("rank5@example.com", "rank5", 1200, "BRONZE_2");
+        Long me = insertMember("me@example.com", "me", 40, "SILVER_1");
+        Long rank4 = insertMember("rank4@example.com", "rank4", 10, "SILVER_4");
+        Long rank5 = insertMember("rank5@example.com", "rank5", 3, "BRONZE_2");
+        insertMemberRatingProfile(rank1, 1700, "GOLD_4");
+        insertMemberRatingProfile(rank2, 1600, "GOLD_5");
+        insertMemberRatingProfile(me, 1580, "SILVER_1");
+        insertMemberRatingProfile(rank4, 1400, "SILVER_4");
+        insertMemberRatingProfile(rank5, 1200, "BRONZE_2");
 
         Long problem1500 = insertProblem("P1500", "DP Basic", 1500);
         Long problem2100 = insertProblem("P2100", "DP Hard", 2100);
@@ -86,10 +91,12 @@ class RankingDashboardControllerTest extends IntegrationTestBase {
                 .andExpect(jsonPath("$.profile.tier").value("SILVER_1"))
                 .andExpect(jsonPath("$.profile.rank").value(3))
                 .andExpect(jsonPath("$.profile.percentile").value(60.0))
-                .andExpect(jsonPath("$.profile.score").value(1580))
+                .andExpect(jsonPath("$.profile.score").value(40))
+                .andExpect(jsonPath("$.profile.battleRating").value(1580))
                 .andExpect(jsonPath("$.profile.nextTier").value("GOLD_5"))
                 .andExpect(jsonPath("$.profile.battleMatchCount").value(2))
                 .andExpect(jsonPath("$.profile.top2Rate").value(50))
+                .andExpect(jsonPath("$.profile.top2SampleSize").value(2))
                 .andExpect(jsonPath("$.profile.scoreDeltaTotal").value(15))
                 .andExpect(jsonPath("$.scoreTrend", hasSize(2)))
                 .andExpect(jsonPath("$.scoreTrend[0].label").value("D-6"))
@@ -106,8 +113,11 @@ class RankingDashboardControllerTest extends IntegrationTestBase {
                 .andExpect(jsonPath("$.gateProgress[1].target").value(12))
                 .andExpect(jsonPath("$.nearbyRanking", hasSize(5)))
                 .andExpect(jsonPath("$.nearbyRanking[0].memberId").value(rank1))
+                .andExpect(jsonPath("$.nearbyRanking[0].score").value(1700))
                 .andExpect(jsonPath("$.nearbyRanking[1].memberId").value(rank2))
+                .andExpect(jsonPath("$.nearbyRanking[1].score").value(1600))
                 .andExpect(jsonPath("$.nearbyRanking[2].memberId").value(me))
+                .andExpect(jsonPath("$.nearbyRanking[2].score").value(1580))
                 .andExpect(jsonPath("$.nearbyRanking[2].isMe").value(true))
                 .andExpect(jsonPath("$.nearbyRanking[3].memberId").value(rank4))
                 .andExpect(jsonPath("$.nearbyRanking[4].memberId").value(rank5))
@@ -134,13 +144,17 @@ class RankingDashboardControllerTest extends IntegrationTestBase {
                 .andExpect(jsonPath("$.profile.tier").value("BRONZE_5"))
                 .andExpect(jsonPath("$.profile.rank").value(1))
                 .andExpect(jsonPath("$.profile.percentile").value(100.0))
+                .andExpect(jsonPath("$.profile.score").value(0))
+                .andExpect(jsonPath("$.profile.battleRating").value(1000))
                 .andExpect(jsonPath("$.profile.battleMatchCount").value(0))
                 .andExpect(jsonPath("$.profile.top2Rate").value(0))
+                .andExpect(jsonPath("$.profile.top2SampleSize").value(0))
                 .andExpect(jsonPath("$.scoreTrend", hasSize(1)))
                 .andExpect(jsonPath("$.scoreTrend[0].label").value("NOW"))
-                .andExpect(jsonPath("$.scoreTrend[0].score").value(0))
+                .andExpect(jsonPath("$.scoreTrend[0].score").value(1000))
                 .andExpect(jsonPath("$.scoreTrend[0].delta").value(0))
                 .andExpect(jsonPath("$.gateProgress[0].key").value("SCORE"))
+                .andExpect(jsonPath("$.gateProgress[0].current").value(1000))
                 .andExpect(jsonPath("$.gateProgress[0].target").value(1060))
                 .andExpect(jsonPath("$.nearbyRanking", hasSize(1)))
                 .andExpect(jsonPath("$.nearbyRanking[0].isMe").value(true))
@@ -162,6 +176,16 @@ class RankingDashboardControllerTest extends IntegrationTestBase {
                 values (nextval('member_id_seq'), ?, ?, 'password', ?, ?, 'USER', now())
                 returning id
                 """, Long.class, email, nickname, score, tier);
+    }
+
+    private void insertMemberRatingProfile(Long memberId, int battleRating, String tier) {
+        jdbcTemplate.update("""
+                insert into member_rating_profiles (
+                    id, member_id, battle_rating, hard_battle_rating, first_solve_score,
+                    tier_score, battle_match_count, first_solved_problem_count, tier, created_at
+                )
+                values (nextval('member_rating_profile_id_seq'), ?, ?, 1000, 0, ?, 0, 0, ?, now())
+                """, memberId, battleRating, battleRating, tier);
     }
 
     private Long insertProblem(String sourceProblemId, String title, int difficultyRating) {

@@ -3,6 +3,7 @@ package com.back.domain.ranking.dashboard.dto;
 import java.time.LocalDateTime;
 import java.util.List;
 
+// 메인 홈 랭킹 대시보드 응답 DTO다.
 public record RankingDashboardResponse(
         Profile profile,
         List<ScoreTrendPoint> scoreTrend,
@@ -19,9 +20,11 @@ public record RankingDashboardResponse(
             long rank,
             double percentile,
             long score,
+            long battleRating,
             String nextTier,
             long battleMatchCount,
             int top2Rate,
+            int top2SampleSize,
             long scoreDeltaTotal) {}
 
     public record ScoreTrendPoint(String label, LocalDateTime occurredAt, long score, long delta) {}
