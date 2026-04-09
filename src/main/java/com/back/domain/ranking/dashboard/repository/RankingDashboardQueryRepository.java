@@ -20,7 +20,9 @@ import lombok.RequiredArgsConstructor;
 
 @Repository
 @RequiredArgsConstructor
+// 메인 홈 대시보드에 필요한 랭킹/배틀 집계 전용 조회를 모아둔다.
 public class RankingDashboardQueryRepository {
+    private static final long DEFAULT_BATTLE_RATING = 1000L;
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
 
@@ -30,48 +32,51 @@ public class RankingDashboardQueryRepository {
                     select
                         m.id as member_id,
                         m.nickname,
-                        m.tier,
+                        mrp.tier,
                         coalesce(m.score, 0) as score,
-                        row_number() over (order by coalesce(m.score, 0) desc, m.id asc) as rank_no,
+                        coalesce(mrp.battle_rating, :defaultBattleRating) as battle_rating,
+                        row_number() over (order by coalesce(mrp.battle_rating, :defaultBattleRating) desc, m.id asc) as rank_no,
                         count(*) over () as total_count
                     from members m
+                    left join member_rating_profiles mrp on mrp.member_id = m.id
                 )
-                select member_id, nickname, tier, score, rank_no, total_count
+                select member_id, nickname, tier, score, battle_rating, rank_no, total_count
                 from ranked
                 where member_id = :memberId
                 """;
 
         return queryForOptional(
                 sql,
-                Map.of("memberId", memberId),
+                Map.of("memberId", memberId, "defaultBattleRating", DEFAULT_BATTLE_RATING),
                 (rs, rowNum) -> new MemberRankRow(
                         rs.getLong("member_id"),
                         rs.getString("nickname"),
                         rs.getString("tier"),
                         getLong(rs, "score"),
+                        getLong(rs, "battle_rating"),
                         getLong(rs, "rank_no"),
                         getLong(rs, "total_count")));
     }
 
     public BattleSummary findBattleSummary(Long memberId, int top2WindowSize) {
+        // 전체 완료 배틀 수는 누적 기준으로 유지한다.
         String summarySql = """
                 select
-                    count(*) as battle_match_count,
-                    coalesce(sum(bp.score_delta), 0) as score_delta_total
+                    count(*) as battle_match_count
                 from battle_participants bp
                 join battle_rooms br on br.id = bp.room_id
                 where bp.user_id = :memberId
                   and upper(br.status) = 'FINISHED'
                 """;
 
-        BattleSummary totalSummary = jdbcTemplate.queryForObject(
-                summarySql,
-                Map.of("memberId", memberId),
-                (rs, rowNum) ->
-                        new BattleSummary(getLong(rs, "battle_match_count"), 0, getLong(rs, "score_delta_total")));
+        Long battleMatchCount = jdbcTemplate.queryForObject(
+                summarySql, Map.of("memberId", memberId), (rs, rowNum) -> getLong(rs, "battle_match_count"));
 
-        String recentRanksSql = """
-                select bp.final_rank
+        // Top2 비율과 최근 변동 합계는 최근 완료 배틀 최대 20판 기준으로 계산한다.
+        String recentBattleWindowSql = """
+                select
+                    bp.final_rank,
+                    coalesce(bp.score_delta, 0) as score_delta
                 from battle_participants bp
                 join battle_rooms br on br.id = bp.room_id
                 where bp.user_id = :memberId
@@ -84,11 +89,18 @@ public class RankingDashboardQueryRepository {
 
         SqlParameterSource params =
                 new MapSqlParameterSource().addValue("memberId", memberId).addValue("limit", top2WindowSize);
-        List<Integer> recentRanks =
-                jdbcTemplate.query(recentRanksSql, params, (rs, rowNum) -> getInt(rs, "final_rank"));
-        int top2Rate = calculateTop2Rate(recentRanks);
+        List<RecentBattleWindowRow> recentBattleWindow = jdbcTemplate.query(
+                recentBattleWindowSql,
+                params,
+                (rs, rowNum) -> new RecentBattleWindowRow(getInt(rs, "final_rank"), getLong(rs, "score_delta")));
+        int top2Rate = calculateTop2Rate(recentBattleWindow);
+        int top2SampleSize = recentBattleWindow.size();
+        long recentScoreDeltaTotal = recentBattleWindow.stream()
+                .mapToLong(RecentBattleWindowRow::scoreDelta)
+                .sum();
 
-        return new BattleSummary(totalSummary.battleMatchCount(), top2Rate, totalSummary.scoreDeltaTotal());
+        return new BattleSummary(
+                battleMatchCount == null ? 0L : battleMatchCount, top2Rate, top2SampleSize, recentScoreDeltaTotal);
     }
 
     public List<BattleTrendRow> findRecentBattleTrends(Long memberId, int limit) {
@@ -137,25 +149,30 @@ public class RankingDashboardQueryRepository {
                     select
                         m.id as member_id,
                         m.nickname,
-                        m.tier,
-                        coalesce(m.score, 0) as score,
-                        row_number() over (order by coalesce(m.score, 0) desc, m.id asc) as rank_no
+                        mrp.tier,
+                        coalesce(mrp.battle_rating, :defaultBattleRating) as battle_rating,
+                        row_number() over (
+                            order by coalesce(mrp.battle_rating, :defaultBattleRating) desc, m.id asc
+                        ) as rank_no
                     from members m
+                    left join member_rating_profiles mrp on mrp.member_id = m.id
                 ),
                 me as (
                     select rank_no
                     from ranked
                     where member_id = :memberId
                 )
-                select r.rank_no, r.member_id, r.nickname, r.tier, r.score
+                select r.rank_no, r.member_id, r.nickname, r.tier, r.battle_rating
                 from ranked r
                 cross join me
                 where r.rank_no between me.rank_no - :radius and me.rank_no + :radius
                 order by r.rank_no asc
                 """;
 
-        SqlParameterSource params =
-                new MapSqlParameterSource().addValue("memberId", memberId).addValue("radius", radius);
+        SqlParameterSource params = new MapSqlParameterSource()
+                .addValue("memberId", memberId)
+                .addValue("radius", radius)
+                .addValue("defaultBattleRating", DEFAULT_BATTLE_RATING);
         return jdbcTemplate.query(
                 sql,
                 params,
@@ -164,12 +181,21 @@ public class RankingDashboardQueryRepository {
                         rs.getLong("member_id"),
                         rs.getString("nickname"),
                         rs.getString("tier"),
-                        getLong(rs, "score")));
+                        getLong(rs, "battle_rating")));
     }
 
     public List<TierSourceRow> findTierSources() {
-        String sql = "select tier, coalesce(score, 0) as score from members";
-        return jdbcTemplate.query(sql, (rs, rowNum) -> new TierSourceRow(rs.getString("tier"), getLong(rs, "score")));
+        String sql = """
+                select
+                    mrp.tier,
+                    coalesce(mrp.battle_rating, :defaultBattleRating) as battle_rating
+                from members m
+                left join member_rating_profiles mrp on mrp.member_id = m.id
+                """;
+        return jdbcTemplate.query(
+                sql,
+                Map.of("defaultBattleRating", DEFAULT_BATTLE_RATING),
+                (rs, rowNum) -> new TierSourceRow(rs.getString("tier"), getLong(rs, "battle_rating")));
     }
 
     public List<RankingDashboardResponse.TagStat> findTagStats(Long memberId) {
@@ -222,14 +248,17 @@ public class RankingDashboardQueryRepository {
         return jdbcTemplate.query(sql, params, rowMapper).stream().findFirst();
     }
 
-    private int calculateTop2Rate(List<Integer> recentRanks) {
-        if (recentRanks == null || recentRanks.isEmpty()) {
+    // 최근 표본에서 final_rank <= 2 인 비율을 퍼센트로 환산한다.
+    private int calculateTop2Rate(List<RecentBattleWindowRow> recentBattleWindow) {
+        if (recentBattleWindow == null || recentBattleWindow.isEmpty()) {
             return 0;
         }
 
-        long top2Count =
-                recentRanks.stream().filter(rank -> rank != null && rank <= 2).count();
-        return (int) Math.round((double) top2Count * 100.0d / recentRanks.size());
+        long top2Count = recentBattleWindow.stream()
+                .map(RecentBattleWindowRow::finalRank)
+                .filter(rank -> rank != null && rank <= 2)
+                .count();
+        return (int) Math.round((double) top2Count * 100.0d / recentBattleWindow.size());
     }
 
     private static long getLong(ResultSet rs, String column) throws SQLException {
@@ -247,13 +276,16 @@ public class RankingDashboardQueryRepository {
         return value == null ? null : value.toLocalDateTime();
     }
 
-    public record MemberRankRow(Long memberId, String nickname, String tier, long score, long rank, long totalCount) {}
+    public record MemberRankRow(
+            Long memberId, String nickname, String tier, long score, long battleRating, long rank, long totalCount) {}
 
-    public record BattleSummary(long battleMatchCount, int top2Rate, long scoreDeltaTotal) {}
+    public record BattleSummary(long battleMatchCount, int top2Rate, int top2SampleSize, long scoreDeltaTotal) {}
 
     public record BattleTrendRow(LocalDateTime occurredAt, long delta) {}
 
-    public record NearbyRankingRow(long rank, Long memberId, String nickname, String tier, long score) {}
+    public record NearbyRankingRow(long rank, Long memberId, String nickname, String tier, long battleRating) {}
 
-    public record TierSourceRow(String tier, long score) {}
+    public record TierSourceRow(String tier, long battleRating) {}
+
+    private record RecentBattleWindowRow(Integer finalRank, long scoreDelta) {}
 }
