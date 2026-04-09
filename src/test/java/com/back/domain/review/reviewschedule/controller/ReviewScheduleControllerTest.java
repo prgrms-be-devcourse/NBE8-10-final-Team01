@@ -13,6 +13,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import com.back.domain.member.member.entity.Member;
+import com.back.domain.review.reviewschedule.dto.ReviewScheduleResponse;
 import com.back.domain.review.reviewschedule.dto.TodayReviewResponse;
 import com.back.domain.review.reviewschedule.service.ReviewScheduleService;
 import com.back.global.rq.Rq;
@@ -68,6 +69,47 @@ class ReviewScheduleControllerTest {
 
         assertThat(result.resultCode()).isEqualTo("200");
         assertThat(result.data().reviews()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("비로그인 상태에서 복습 스케줄 조회하면 401을 반환한다")
+    void getReviewSchedule_unauthenticated_returns401() {
+        when(rq.getActor()).thenReturn(null);
+
+        RsData<ReviewScheduleResponse> result = controller.getReviewSchedule(10L);
+
+        assertThat(result.resultCode()).isEqualTo("401");
+        verify(reviewScheduleService, never()).getReviewSchedule(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyLong());
+    }
+
+    @Test
+    @DisplayName("스케줄이 존재하면 reviewCount와 isReviewRequired를 반환한다")
+    void getReviewSchedule_authenticated_returnsData() {
+        Member actor = Member.of(1L, "test@test.com", "tester");
+        ReviewScheduleResponse serviceResponse = new ReviewScheduleResponse(2, true);
+
+        when(rq.getActor()).thenReturn(actor);
+        when(reviewScheduleService.getReviewSchedule(10L, 1L)).thenReturn(serviceResponse);
+
+        RsData<ReviewScheduleResponse> result = controller.getReviewSchedule(10L);
+
+        assertThat(result.resultCode()).isEqualTo("200");
+        assertThat(result.data().reviewCount()).isEqualTo(2);
+        assertThat(result.data().isReviewRequired()).isTrue();
+    }
+
+    @Test
+    @DisplayName("스케줄이 없으면 data가 null인 200을 반환한다")
+    void getReviewSchedule_authenticated_returnsNullData() {
+        Member actor = Member.of(1L, "test@test.com", "tester");
+
+        when(rq.getActor()).thenReturn(actor);
+        when(reviewScheduleService.getReviewSchedule(10L, 1L)).thenReturn(null);
+
+        RsData<ReviewScheduleResponse> result = controller.getReviewSchedule(10L);
+
+        assertThat(result.resultCode()).isEqualTo("200");
+        assertThat(result.data()).isNull();
     }
 
     @Test

@@ -10,6 +10,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.back.domain.member.member.entity.Member;
 import com.back.domain.problem.problem.entity.Problem;
+import com.back.domain.review.reviewschedule.dto.ReviewScheduleResponse;
 import com.back.domain.review.reviewschedule.dto.TodayReviewResponse;
 import com.back.domain.review.reviewschedule.entity.ReviewSchedule;
 import com.back.domain.review.reviewschedule.repository.ReviewScheduleRepository;
@@ -28,6 +29,13 @@ public class ReviewScheduleService {
         List<TodayReviewResponse.ReviewItem> items =
                 schedules.stream().map(TodayReviewResponse.ReviewItem::from).toList();
         return new TodayReviewResponse(items);
+    }
+
+    @Transactional(readOnly = true)
+    public ReviewScheduleResponse getReviewSchedule(Long problemId, Long memberId) {
+        return reviewScheduleRepository.findByMemberIdAndProblemId(memberId, problemId)
+                .map(ReviewScheduleResponse::from)
+                .orElse(null);
     }
 
     @Transactional
