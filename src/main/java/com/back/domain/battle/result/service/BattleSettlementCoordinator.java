@@ -16,6 +16,10 @@ public class BattleSettlementCoordinator {
 
     private final BattleSettlementExecutor battleSettlementExecutor;
 
+    /**
+     * {@link BattleSettlementRequestedEvent} 는 반드시 AFTER_COMMIT 에서만 소비한다.
+     * 이 규칙이 깨지면 커밋 이전 정산 실행으로 트랜잭션 경계가 꼬일 수 있다.
+     */
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onRequested(BattleSettlementRequestedEvent event) {
         log.info("BattleSettlementCoordinator received roomId={}", event.roomId());
