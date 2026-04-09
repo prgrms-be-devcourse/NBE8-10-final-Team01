@@ -2,6 +2,7 @@ package com.back.domain.problem.submission.entity;
 
 import com.back.domain.battle.battleroom.entity.BattleRoom;
 import com.back.domain.member.member.entity.Member;
+import com.back.domain.problem.problem.entity.Problem;
 import com.back.global.jpa.entity.BaseEntity;
 
 import jakarta.persistence.*;
@@ -27,6 +28,10 @@ public class Submission extends BaseEntity {
     @JoinColumn(name = "user_id")
     private Member member;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "problem_id")
+    private Problem problem;
+
     @Column(columnDefinition = "TEXT")
     private String code;
 
@@ -42,6 +47,7 @@ public class Submission extends BaseEntity {
         Submission submission = new Submission();
         submission.battleRoom = battleRoom;
         submission.member = member;
+        submission.problem = battleRoom != null ? battleRoom.getProblem() : null;
         submission.code = code;
         submission.language = language;
         return submission;
