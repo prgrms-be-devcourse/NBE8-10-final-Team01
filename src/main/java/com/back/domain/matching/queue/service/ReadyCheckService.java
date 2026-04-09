@@ -219,7 +219,7 @@ public class ReadyCheckService {
                 publishMatchExpired(matchSession);
                 matchStateStore.clearTerminalMatch(matchId);
             } catch (IllegalStateException ignored) {
-                // 다른 요청이 먼저 정리한 세션은 그대로 건너뛴다.
+                // deadline 후보 조회 후 accept/decline/room 생성/다른 스케줄러가 먼저 처리한 세션은 건너뛴다.
             }
         }
     }

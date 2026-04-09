@@ -82,6 +82,7 @@ public interface MatchStateStore {
 
     /**
      * deadline이 지난 ready-check 세션을 EXPIRED 상태로 전환한다.
+     * deadline 후보 조회 후 다른 요청이 먼저 처리해 ACCEPT_PENDING이 아니면 예외를 던질 수 있다.
      */
     MatchSession expire(Long matchId);
 
