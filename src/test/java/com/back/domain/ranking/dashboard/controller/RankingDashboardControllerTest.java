@@ -229,9 +229,9 @@ class RankingDashboardControllerTest extends IntegrationTestBase {
     private void insertReview(Long memberId, Long problemId, LocalDateTime solvedAt, LocalDateTime nextReviewAt) {
         jdbcTemplate.update("""
                 insert into review_schedule (
-                    id, user_id, problem_id, solved_at, next_review_at, review_count, created_at
+                    id, user_id, problem_id, solved_at, next_review_at, review_count, is_review_required, created_at
                 )
-                values (nextval('review_schedule_id_seq'), ?, ?, ?, ?, 1, now())
+                values (nextval('review_schedule_id_seq'), ?, ?, ?, ?, 1, true, now())
                 """, memberId, problemId, solvedAt, nextReviewAt);
     }
 }
