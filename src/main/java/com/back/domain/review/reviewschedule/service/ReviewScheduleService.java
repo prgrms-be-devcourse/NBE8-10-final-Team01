@@ -33,7 +33,8 @@ public class ReviewScheduleService {
 
     @Transactional(readOnly = true)
     public ReviewScheduleResponse getReviewSchedule(Long problemId, Long memberId) {
-        return reviewScheduleRepository.findByMemberIdAndProblemId(memberId, problemId)
+        return reviewScheduleRepository
+                .findByMemberIdAndProblemId(memberId, problemId)
                 .map(ReviewScheduleResponse::from)
                 .orElse(null);
     }

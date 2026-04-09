@@ -79,7 +79,8 @@ class ReviewScheduleControllerTest {
         RsData<ReviewScheduleResponse> result = controller.getReviewSchedule(10L);
 
         assertThat(result.resultCode()).isEqualTo("401");
-        verify(reviewScheduleService, never()).getReviewSchedule(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyLong());
+        verify(reviewScheduleService, never())
+                .getReviewSchedule(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyLong());
     }
 
     @Test

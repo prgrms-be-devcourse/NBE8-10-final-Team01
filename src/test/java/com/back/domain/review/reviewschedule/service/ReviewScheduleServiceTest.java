@@ -167,8 +167,7 @@ class ReviewScheduleServiceTest {
     @DisplayName("복습 스케줄이 존재하면 reviewCount와 isReviewRequired를 반환한다")
     void getReviewSchedule_returnsScheduleData() {
         ReviewSchedule schedule = scheduleWithReviewCount(2);
-        when(reviewScheduleRepository.findByMemberIdAndProblemId(1L, 10L))
-                .thenReturn(Optional.of(schedule));
+        when(reviewScheduleRepository.findByMemberIdAndProblemId(1L, 10L)).thenReturn(Optional.of(schedule));
 
         ReviewScheduleResponse response = reviewScheduleService.getReviewSchedule(10L, 1L);
 
@@ -180,8 +179,7 @@ class ReviewScheduleServiceTest {
     @Test
     @DisplayName("복습 스케줄이 없으면 null을 반환한다")
     void getReviewSchedule_returnsNullWhenNotFound() {
-        when(reviewScheduleRepository.findByMemberIdAndProblemId(1L, 10L))
-                .thenReturn(Optional.empty());
+        when(reviewScheduleRepository.findByMemberIdAndProblemId(1L, 10L)).thenReturn(Optional.empty());
 
         ReviewScheduleResponse response = reviewScheduleService.getReviewSchedule(10L, 1L);
 
