@@ -48,6 +48,7 @@ class ReviewScheduleControllerTest {
         RsData<TodayReviewResponse> result = controller.getTodayReviews();
 
         assertThat(result.resultCode()).isEqualTo("200");
+        assertThat(result.data().totalCount()).isEqualTo(1);
         assertThat(result.data().reviews()).hasSize(1);
         assertThat(result.data().reviews().get(0).problemId()).isEqualTo(10L);
         assertThat(result.data().reviews().get(0).problemTitle()).isEqualTo("문제A");

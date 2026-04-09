@@ -4,7 +4,11 @@ import java.util.List;
 
 import com.back.domain.review.reviewschedule.entity.ReviewSchedule;
 
-public record TodayReviewResponse(List<ReviewItem> reviews) {
+public record TodayReviewResponse(int totalCount, List<ReviewItem> reviews) {
+
+    public TodayReviewResponse(List<ReviewItem> reviews) {
+        this(reviews.size(), reviews);
+    }
 
     public record ReviewItem(Long problemId, String problemTitle, int reviewCount) {
         public static ReviewItem from(ReviewSchedule schedule) {
