@@ -20,6 +20,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.back.domain.member.member.entity.Member;
 import com.back.domain.problem.problem.entity.Problem;
+import com.back.domain.review.reviewschedule.dto.ReviewScheduleResponse;
 import com.back.domain.review.reviewschedule.dto.TodayReviewResponse;
 import com.back.domain.review.reviewschedule.entity.ReviewSchedule;
 import com.back.domain.review.reviewschedule.repository.ReviewScheduleRepository;
@@ -160,6 +161,29 @@ class ReviewScheduleServiceTest {
 
         assertThatThrownBy(() -> reviewScheduleService.dismissReview(10L, 1L))
                 .isInstanceOf(ResponseStatusException.class);
+    }
+
+    @Test
+    @DisplayName("복습 스케줄이 존재하면 reviewCount와 isReviewRequired를 반환한다")
+    void getReviewSchedule_returnsScheduleData() {
+        ReviewSchedule schedule = scheduleWithReviewCount(2);
+        when(reviewScheduleRepository.findByMemberIdAndProblemId(1L, 10L)).thenReturn(Optional.of(schedule));
+
+        ReviewScheduleResponse response = reviewScheduleService.getReviewSchedule(10L, 1L);
+
+        assertThat(response).isNotNull();
+        assertThat(response.reviewCount()).isEqualTo(2);
+        assertThat(response.isReviewRequired()).isTrue();
+    }
+
+    @Test
+    @DisplayName("복습 스케줄이 없으면 null을 반환한다")
+    void getReviewSchedule_returnsNullWhenNotFound() {
+        when(reviewScheduleRepository.findByMemberIdAndProblemId(1L, 10L)).thenReturn(Optional.empty());
+
+        ReviewScheduleResponse response = reviewScheduleService.getReviewSchedule(10L, 1L);
+
+        assertThat(response).isNull();
     }
 
     /**
