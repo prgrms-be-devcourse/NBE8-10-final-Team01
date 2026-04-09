@@ -123,6 +123,7 @@ class ReviewScheduleServiceTest {
 
         TodayReviewResponse response = reviewScheduleService.getTodayReviews(99L);
 
+        assertThat(response.totalCount()).isEqualTo(2);
         assertThat(response.reviews()).hasSize(2);
         assertThat(response.reviews().get(0).problemId()).isEqualTo(10L);
         assertThat(response.reviews().get(0).problemTitle()).isEqualTo("문제A");
