@@ -13,6 +13,7 @@ import com.back.domain.member.member.dto.MyInfoResponse;
 import com.back.domain.member.member.entity.Member;
 import com.back.domain.member.member.repository.MemberRepository;
 import com.back.domain.rating.policy.TierPolicy;
+import com.back.domain.rating.profile.entity.MemberRatingProfile;
 import com.back.domain.rating.profile.repository.MemberRatingProfileRepository;
 import com.back.domain.rating.profile.service.RatingProfileService;
 import com.back.global.exception.ServiceException;
@@ -76,15 +77,21 @@ public class MemberService {
                 .findById(memberId)
                 .orElseThrow(() -> new ServiceException("MEMBER_404", "존재하지 않는 회원입니다"));
 
-        String rankingTier = memberRatingProfileRepository
-                .findByMemberId(memberId)
-                .map(ratingProfile -> TierPolicy.resolveDisplayTier(
+        MemberRatingProfile ratingProfile =
+                memberRatingProfileRepository.findByMemberId(memberId).orElse(null);
+
+        String rankingTier = ratingProfile != null
+                ? TierPolicy.resolveDisplayTier(
                         ratingProfile.getTier(),
                         ratingProfile.getBattleMatchCount(),
-                        ratingProfile.getFirstSolvedProblemCount()))
-                .orElseGet(() -> TierPolicy.resolveDisplayTier(null, null, null));
+                        ratingProfile.getFirstSolvedProblemCount())
+                : TierPolicy.resolveDisplayTier(null, null, null);
 
-        return RsData.of("200", "내 정보 조회 성공", MyInfoResponse.from(member, rankingTier));
+        long rankingScore = ratingProfile == null || ratingProfile.getTierScore() == null
+                ? 0L
+                : ratingProfile.getTierScore().longValue();
+
+        return RsData.of("200", "내 정보 조회 성공", MyInfoResponse.from(member, rankingTier, rankingScore));
     }
 
     // 로그인 — 인증 성공 시 accessToken + refreshToken 반환 (쿠키 설정은 컨트롤러가 담당)

@@ -24,6 +24,6 @@ public interface MemberRatingProfileRepository extends JpaRepository<MemberRatin
     // 문제별 first-AC 난이도 누적 리더보드
     Page<MemberRatingProfile> findAllByOrderByFirstSolveScoreDescMemberIdAsc(Pageable pageable);
 
-    List<MemberRatingProfile> findAllByTierInOrderByHardBattleRatingDescBattleRatingDescMemberIdAsc(
+    List<MemberRatingProfile> findAllByTierInOrderByBattleRatingDescFirstSolveScoreDescMemberIdAsc(
             Collection<RatingTier> tiers);
 }

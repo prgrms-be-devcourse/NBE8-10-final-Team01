@@ -12,23 +12,23 @@ class TierPolicyTest {
     @Test
     @DisplayName("SR은 높아도 AP 게이트를 못 넘으면 티어가 제한된다")
     void resolveTier_cappedByGate() {
-        RatingTier tier = TierPolicy.resolveTier(2500, 2500, 0, 0, 0, 0, 0, 0.0d);
+        RatingTier tier = TierPolicy.resolveTier(1500, 0, 0, 0, 0, 0, 0.0d);
 
         assertThat(tier).isEqualTo(RatingTier.BRONZE_1);
     }
 
     @Test
-    @DisplayName("다이아 이상은 Hard SR을 만족하지 못하면 플래티넘으로 제한된다")
-    void resolveTier_cappedByHardRating() {
-        RatingTier tier = TierPolicy.resolveTier(2400, 2000, 2000, 20, 20, 30, 10, 0.8d);
+    @DisplayName("다이아 게이트를 만족하면 SR 컷과 함께 다이아 티어를 계산한다")
+    void resolveTier_diamondBySkillAndGate() {
+        RatingTier tier = TierPolicy.resolveTier(1500, 1300, 30, 20, 30, 8, 0.6d);
 
-        assertThat(tier).isEqualTo(RatingTier.PLATINUM_1);
+        assertThat(tier).isEqualTo(RatingTier.DIAMOND_1);
     }
 
     @Test
     @DisplayName("SR/AP/난이도/최근폼을 모두 만족하면 MASTER_1을 계산한다")
     void resolveTier_masterByAllConditions() {
-        RatingTier tier = TierPolicy.resolveTier(2750, 2750, 2500, 50, 30, 70, 20, 0.7d);
+        RatingTier tier = TierPolicy.resolveTier(1800, 2500, 50, 30, 70, 20, 0.7d);
 
         assertThat(tier).isEqualTo(RatingTier.MASTER_1);
     }
@@ -36,7 +36,7 @@ class TierPolicyTest {
     @Test
     @DisplayName("입력값이 null이어도 안전하게 BRONZE_5를 반환한다")
     void resolveTier_whenNull_returnsBronze5() {
-        assertThat(TierPolicy.resolveTier(null, null, null, 0, 0, 0, 0, 0.0d)).isEqualTo(RatingTier.BRONZE_5);
+        assertThat(TierPolicy.resolveTier(null, null, 0, 0, 0, 0, 0.0d)).isEqualTo(RatingTier.BRONZE_5);
     }
 
     @Test
