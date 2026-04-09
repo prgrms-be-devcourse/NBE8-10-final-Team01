@@ -13,6 +13,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import com.back.domain.member.member.entity.Member;
+import com.back.domain.problem.problem.enums.DifficultyLevel;
 import com.back.domain.review.reviewschedule.dto.ReviewScheduleResponse;
 import com.back.domain.review.reviewschedule.dto.TodayReviewResponse;
 import com.back.domain.review.reviewschedule.service.ReviewScheduleService;
@@ -40,7 +41,8 @@ class ReviewScheduleControllerTest {
     @DisplayName("로그인 상태에서 요청하면 서비스 결과와 함께 200을 반환한다")
     void getTodayReviews_authenticated_returns200WithItems() {
         Member actor = Member.of(1L, "test@test.com", "tester");
-        TodayReviewResponse.ReviewItem item = new TodayReviewResponse.ReviewItem(10L, "문제A", 1);
+        TodayReviewResponse.ReviewItem item =
+                new TodayReviewResponse.ReviewItem(10L, "문제A", DifficultyLevel.EASY, 800, 1000L, 256L, 1);
         TodayReviewResponse serviceResponse = new TodayReviewResponse(List.of(item));
 
         when(rq.getActor()).thenReturn(actor);
@@ -53,6 +55,7 @@ class ReviewScheduleControllerTest {
         assertThat(result.data().reviews()).hasSize(1);
         assertThat(result.data().reviews().get(0).problemId()).isEqualTo(10L);
         assertThat(result.data().reviews().get(0).problemTitle()).isEqualTo("문제A");
+        assertThat(result.data().reviews().get(0).difficulty()).isEqualTo(DifficultyLevel.EASY);
         assertThat(result.data().reviews().get(0).reviewCount()).isEqualTo(1);
     }
 
