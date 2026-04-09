@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -14,17 +15,13 @@ import com.back.domain.battle.battleparticipant.entity.BattleParticipantStatus;
 import com.back.domain.battle.battleparticipant.repository.BattleParticipantRepository;
 import com.back.domain.battle.battleroom.entity.BattleRoom;
 import com.back.domain.battle.battleroom.repository.BattleRoomRepository;
-import com.back.domain.battle.result.service.BattleResultService;
+import com.back.domain.battle.result.event.BattleSettlementRequestedEvent;
 import com.back.domain.member.member.entity.Member;
 import com.back.domain.member.member.repository.MemberRepository;
-import com.back.global.websocket.BattleTimerStore;
 import com.back.global.websocket.pubsub.WebSocketMessagePublisher;
 
-import jakarta.persistence.OptimisticLockException;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 
-@Slf4j
 @Service
 @RequiredArgsConstructor
 public class BattleAcService {
@@ -32,9 +29,8 @@ public class BattleAcService {
     private final BattleParticipantRepository battleParticipantRepository;
     private final BattleRoomRepository battleRoomRepository;
     private final MemberRepository memberRepository;
-    private final BattleResultService battleResultService;
-    private final BattleTimerStore battleTimerStore;
     private final WebSocketMessagePublisher publisher;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public void handleAc(Long roomId, Long memberId) {
@@ -56,7 +52,13 @@ public class BattleAcService {
         long completedCount = allParticipants.stream()
                 .filter(p -> p.getStatus() == BattleParticipantStatus.SOLVED)
                 .count();
-        boolean allFinished = allParticipants.stream().allMatch(p -> p.getStatus() == BattleParticipantStatus.SOLVED);
+        boolean noActiveLeft = allParticipants.stream()
+                .noneMatch(p -> p.getStatus() == BattleParticipantStatus.PLAYING
+                        || p.getStatus() == BattleParticipantStatus.ABANDONED);
+
+        if (noActiveLeft) {
+            eventPublisher.publishEvent(new BattleSettlementRequestedEvent(roomId));
+        }
 
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
@@ -75,14 +77,5 @@ public class BattleAcService {
                         Map.of("type", "PARTICIPANT_DONE", "userId", memberId, "rank", completedCount));
             }
         });
-
-        if (allFinished) {
-            battleTimerStore.cancel(roomId);
-            try {
-                battleResultService.settle(roomId);
-            } catch (OptimisticLockException e) {
-                log.info("settle 낙관적 락 충돌 - 이미 정산 완료됨 roomId={}", roomId);
-            }
-        }
     }
 }

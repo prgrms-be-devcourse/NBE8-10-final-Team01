@@ -18,6 +18,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -27,7 +28,7 @@ import com.back.domain.battle.battleparticipant.repository.BattleParticipantRepo
 import com.back.domain.battle.battleroom.entity.BattleRoom;
 import com.back.domain.battle.battleroom.entity.BattleRoomStatus;
 import com.back.domain.battle.battleroom.repository.BattleRoomRepository;
-import com.back.domain.battle.result.service.BattleResultService;
+import com.back.domain.battle.result.event.BattleSettlementRequestedEvent;
 import com.back.domain.member.member.entity.Member;
 import com.back.domain.member.member.repository.MemberRepository;
 import com.back.domain.problem.problem.repository.ProblemRepository;
@@ -47,7 +48,7 @@ class BattleRoomServiceExitRoomTest {
     private final BattleCodeStore battleCodeStore = mock(BattleCodeStore.class);
     private final BattleReconnectStore reconnectStore = mock(BattleReconnectStore.class);
     private final BattleTimerStore battleTimerStore = mock(BattleTimerStore.class);
-    private final BattleResultService battleResultService = mock(BattleResultService.class);
+    private final ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
 
     private final BattleRoomService sut = new BattleRoomService(
             battleRoomRepository,
@@ -58,7 +59,7 @@ class BattleRoomServiceExitRoomTest {
             battleCodeStore,
             reconnectStore,
             battleTimerStore,
-            battleResultService);
+            eventPublisher);
 
     private static final Long ROOM_ID = 1L;
     private static final Long MEMBER_ID = 10L;
@@ -114,25 +115,25 @@ class BattleRoomServiceExitRoomTest {
     }
 
     @Test
-    @DisplayName("마지막 활성 참여자가 퇴장하면 즉시 정산한다")
-    void exitRoom_lastActiveParticipant_settlesImmediately() {
+    @DisplayName("마지막 활성 참여자가 퇴장하면 정산 요청 이벤트를 발행한다")
+    void exitRoom_lastActiveParticipant_publishesSettlementRequestedEvent() {
         BattleRoom room = playingRoom();
         Member member = mockMember();
         BattleParticipant participant = playingParticipant(room, member);
 
-        BattleParticipant exitedOther = mock(BattleParticipant.class);
-        when(exitedOther.getStatus()).thenReturn(BattleParticipantStatus.SOLVED);
+        BattleParticipant solvedOther = mock(BattleParticipant.class);
+        when(solvedOther.getStatus()).thenReturn(BattleParticipantStatus.SOLVED);
 
-        givenRoomMemberParticipant(room, member, participant, List.of(participant, exitedOther));
+        givenRoomMemberParticipant(room, member, participant, List.of(participant, solvedOther));
 
         withAfterCommit(() -> sut.exitRoom(ROOM_ID, MEMBER_ID));
 
-        verify(battleResultService).settle(ROOM_ID);
+        verify(eventPublisher).publishEvent(new BattleSettlementRequestedEvent(ROOM_ID));
     }
 
     @Test
-    @DisplayName("활성 참여자가 남아있으면 퇴장해도 정산하지 않는다")
-    void exitRoom_activeParticipantRemains_doesNotSettle() {
+    @DisplayName("활성 참여자가 남아있으면 퇴장해도 정산 요청 이벤트를 발행하지 않는다")
+    void exitRoom_activeParticipantRemains_doesNotPublishSettlementRequestedEvent() {
         BattleRoom room = playingRoom();
         Member member = mockMember();
         BattleParticipant participant = playingParticipant(room, member);
@@ -144,12 +145,12 @@ class BattleRoomServiceExitRoomTest {
 
         withAfterCommit(() -> sut.exitRoom(ROOM_ID, MEMBER_ID));
 
-        verify(battleResultService, never()).settle(any());
+        verify(eventPublisher, never()).publishEvent(any(BattleSettlementRequestedEvent.class));
     }
 
     @Test
-    @DisplayName("ABANDONED 참여자만 남아있으면 퇴장해도 정산하지 않는다")
-    void exitRoom_onlyAbandonedParticipantRemains_doesNotSettle() {
+    @DisplayName("ABANDONED 참여자가 남아있으면 퇴장해도 정산 요청 이벤트를 발행하지 않는다")
+    void exitRoom_onlyAbandonedParticipantRemains_doesNotPublishSettlementRequestedEvent() {
         BattleRoom room = playingRoom();
         Member member = mockMember();
         BattleParticipant participant = playingParticipant(room, member);
@@ -161,7 +162,7 @@ class BattleRoomServiceExitRoomTest {
 
         withAfterCommit(() -> sut.exitRoom(ROOM_ID, MEMBER_ID));
 
-        verify(battleResultService, never()).settle(any());
+        verify(eventPublisher, never()).publishEvent(any(BattleSettlementRequestedEvent.class));
     }
 
     @Test

@@ -17,6 +17,7 @@ import java.util.function.Supplier;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -26,7 +27,6 @@ import com.back.domain.battle.battleparticipant.repository.BattleParticipantRepo
 import com.back.domain.battle.battleroom.dto.JoinRoomResponse;
 import com.back.domain.battle.battleroom.entity.BattleRoom;
 import com.back.domain.battle.battleroom.repository.BattleRoomRepository;
-import com.back.domain.battle.result.service.BattleResultService;
 import com.back.domain.member.member.entity.Member;
 import com.back.domain.member.member.repository.MemberRepository;
 import com.back.domain.problem.problem.entity.Problem;
@@ -49,7 +49,7 @@ class BattleRoomServiceJoinRoomTest {
     private final BattleCodeStore battleCodeStore = mock(BattleCodeStore.class);
     private final BattleReconnectStore reconnectStore = mock(BattleReconnectStore.class);
     private final BattleTimerStore battleTimerStore = mock(BattleTimerStore.class);
-    private final BattleResultService battleResultService = mock(BattleResultService.class);
+    private final ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
 
     private final BattleRoomService sut = new BattleRoomService(
             battleRoomRepository,
@@ -60,7 +60,7 @@ class BattleRoomServiceJoinRoomTest {
             battleCodeStore,
             reconnectStore,
             battleTimerStore,
-            battleResultService);
+            eventPublisher);
 
     @Test
     @DisplayName("READY 참여자가 입장하면 PLAYING 상태 이벤트를 발행한다")

@@ -201,6 +201,7 @@ public class BattleResultService {
                 }
             }
         });
+        log.info("settle end roomId={}", roomId);
     }
 
     @Transactional(readOnly = true)

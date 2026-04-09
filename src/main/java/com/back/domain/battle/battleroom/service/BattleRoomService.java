@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -21,7 +22,7 @@ import com.back.domain.battle.battleroom.dto.RoomResponse;
 import com.back.domain.battle.battleroom.entity.BattleRoom;
 import com.back.domain.battle.battleroom.entity.BattleRoomStatus;
 import com.back.domain.battle.battleroom.repository.BattleRoomRepository;
-import com.back.domain.battle.result.service.BattleResultService;
+import com.back.domain.battle.result.event.BattleSettlementRequestedEvent;
 import com.back.domain.member.member.entity.Member;
 import com.back.domain.member.member.repository.MemberRepository;
 import com.back.domain.problem.problem.entity.Problem;
@@ -32,7 +33,6 @@ import com.back.global.websocket.BattleReconnectStore;
 import com.back.global.websocket.BattleTimerStore;
 import com.back.global.websocket.pubsub.WebSocketMessagePublisher;
 
-import jakarta.persistence.OptimisticLockException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -49,7 +49,7 @@ public class BattleRoomService {
     private final BattleCodeStore battleCodeStore;
     private final BattleReconnectStore reconnectStore;
     private final BattleTimerStore battleTimerStore;
-    private final BattleResultService battleResultService;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public CreateRoomResponse createRoom(CreateRoomRequest request) {
@@ -93,18 +93,13 @@ public class BattleRoomService {
             throw new IllegalStateException("입장할 수 없는 상태의 방입니다. 현재 상태: " + room.getStatus());
         }
 
-        // 2. Member 조회
         Member member =
                 memberRepository.findById(memberId).orElseThrow(() -> new IllegalArgumentException("존재하지 않는 회원입니다."));
 
-        // 3. BattleParticipant 조회
         BattleParticipant participant = battleParticipantRepository
                 .findByBattleRoomAndMember(room, member)
                 .orElseThrow(() -> new IllegalArgumentException("해당 방의 참여자가 아닙니다."));
 
-        // 4. 참여자 상태에 따라 분기
-        //    READY     → 최초 입장 (WAITING 상태 방)
-        //    ABANDONED → 재입장 (PLAYING 상태 방)
         if (participant.getStatus() == BattleParticipantStatus.READY
                 || participant.getStatus() == BattleParticipantStatus.ABANDONED) {
             if (participant.getStatus() == BattleParticipantStatus.ABANDONED) {
@@ -117,8 +112,6 @@ public class BattleRoomService {
             throw new IllegalStateException("입장할 수 없는 참여자 상태입니다. 현재 상태: " + participant.getStatus());
         }
 
-        // 5. 최초 입장 시에만 allPlaying 체크 → 전원 PLAYING이면 배틀 시작
-        //    재입장(PLAYING 방)은 이미 배틀이 시작된 상태이므로 체크하지 않음
         if (room.getStatus() == BattleRoomStatus.WAITING) {
             List<BattleParticipant> allParticipants = battleParticipantRepository.findByBattleRoom(room);
             boolean allPlaying =
@@ -132,9 +125,6 @@ public class BattleRoomService {
                 TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                     @Override
                     public void afterCommit() {
-                        // 커밋 후이므로 예외를 전파해도 트랜잭션 롤백이 불가능하고,
-                        // 클라이언트에게 500이 반환되어 DB는 성공했는데 실패로 인식하는 혼란을 유발함.
-                        // WebSocket은 실시간 알림 역할이므로 전송 실패가 치명적이지 않아 예외를 삼키고 로그만 남김.
                         try {
                             publisher.publish(
                                     "/topic/room/" + roomId, Map.of("type", "BATTLE_STARTED", "timerEnd", timerEnd));
@@ -205,8 +195,6 @@ public class BattleRoomService {
                 .findByBattleRoomAndMember(room, member)
                 .orElseThrow(() -> new ServiceException("403-1", "해당 방의 참여자가 아닙니다."));
 
-        // ABANDONED: WebSocket이 끊긴 상태에서 의도적 퇴장 — grace period 취소 후 QUIT 처리
-        // PLAYING: 정상 접속 상태에서 의도적 퇴장
         if (participant.getStatus() == BattleParticipantStatus.ABANDONED) {
             reconnectStore.cancelGracePeriod(memberId);
         } else if (participant.getStatus() != BattleParticipantStatus.PLAYING) {
@@ -216,22 +204,20 @@ public class BattleRoomService {
         participant.quit();
         battleParticipantRepository.save(participant);
 
-        // 남은 활성 참여자 (PLAYING or ABANDONED) 여부 확인
         List<BattleParticipant> all = battleParticipantRepository.findByBattleRoom(room);
         boolean noActiveLeft = all.stream()
                 .noneMatch(p -> p.getStatus() == BattleParticipantStatus.PLAYING
                         || p.getStatus() == BattleParticipantStatus.ABANDONED);
-        log.debug("exitRoom activated at exitRoom id={} status={}", roomId, noActiveLeft);
+
+        if (noActiveLeft) {
+            log.info("publish BattleSettlementRequestedEvent roomId={}, noActiveLeft={}", roomId, noActiveLeft);
+            eventPublisher.publishEvent(new BattleSettlementRequestedEvent(roomId));
+        }
 
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
                 try {
-                    log.info(
-                            "exitRoom afterCommit start roomId={}, memberId={}, noActiveLeft={}",
-                            roomId,
-                            memberId,
-                            noActiveLeft);
                     publisher.publish(
                             "/topic/room/" + roomId,
                             Map.of(
@@ -243,19 +229,6 @@ public class BattleRoomService {
                                     BattleParticipantStatus.QUIT.name()));
                 } catch (Exception e) {
                     log.error("Failed to publish PARTICIPANT_STATUS_CHANGED(QUIT) WebSocket roomId={}", roomId, e);
-                }
-                log.info("exitRoom afterCommit start roomId={}, noActiveLeft={}", roomId, noActiveLeft);
-                if (noActiveLeft) {
-                    try {
-                        log.info("exitRoom immediate settle start roomId={}", roomId);
-                        battleTimerStore.cancel(roomId);
-                        battleResultService.settle(roomId);
-                        log.info("exitRoom immediate settle done roomId={}", roomId);
-                    } catch (OptimisticLockException e) {
-                        log.info("settle 낙관적 락 충돌 - 이미 정산 완료됨 roomId={}", roomId);
-                    } catch (Exception e) {
-                        log.error("즉시 정산 실패 roomId={}", roomId, e);
-                    }
                 }
             }
         });
