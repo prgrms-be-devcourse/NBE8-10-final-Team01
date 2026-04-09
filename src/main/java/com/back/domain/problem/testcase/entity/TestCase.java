@@ -29,4 +29,13 @@ public class TestCase extends BaseEntity {
     private String expectedOutput;
 
     private Boolean isSample; // 예제 케이스 여부
+
+    public static TestCase create(Problem problem, String input, String expectedOutput, Boolean isSample) {
+        TestCase testCase = new TestCase();
+        testCase.problem = problem;
+        testCase.input = input;
+        testCase.expectedOutput = expectedOutput;
+        testCase.isSample = isSample;
+        return testCase;
+    }
 }

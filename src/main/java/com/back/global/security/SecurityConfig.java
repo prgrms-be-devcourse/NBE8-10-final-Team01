@@ -53,6 +53,9 @@ public class SecurityConfig {
                                 "/actuator/prometheus",
                                 "/error")
                         .permitAll()
+                        // 관리자 API는 ROLE_ADMIN만 접근 허용
+                        .requestMatchers("/api/v1/admin/**")
+                        .hasAuthority("ROLE_ADMIN")
                         // 그 외 모든 요청은 인증 필요 (POST /api/v1/ws/token 포함)
                         .anyRequest()
                         .authenticated())

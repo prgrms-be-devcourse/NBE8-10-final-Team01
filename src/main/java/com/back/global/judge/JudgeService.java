@@ -80,8 +80,11 @@ public class JudgeService {
             // TODO: 함수형 코드 지원 시 driverCode 합치기
             // String fullCode = code + "\n" + problem.getDriverCode().get(language);
             List<Judge0SubmitRequest> batchRequests = testCases.stream()
-                    .map(tc -> new Judge0SubmitRequest(
-                            code, languageId, tc.getInput() != null ? tc.getInput() : "", tc.getExpectedOutput()))
+                    .map(tc -> {
+                        String input = judge0ExecutionService.restoreEscapedNewline(tc.getInput());
+                        String expectedOutput = judge0ExecutionService.restoreEscapedNewline(tc.getExpectedOutput());
+                        return new Judge0SubmitRequest(code, languageId, input != null ? input : "", expectedOutput);
+                    })
                     .toList();
             List<Judge0SubmitResponse> results = judge0ExecutionService.execute(batchRequests);
             results.forEach(r -> log.info(

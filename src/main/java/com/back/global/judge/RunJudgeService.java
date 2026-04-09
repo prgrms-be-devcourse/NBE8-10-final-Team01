@@ -51,8 +51,11 @@ public class RunJudgeService {
             // TODO: 함수형 코드 지원 시 driverCode 합치기
             // String fullCode = code + "\n" + problem.getDriverCode().get(language);
             List<Judge0SubmitRequest> batchRequests = testCases.stream()
-                    .map(tc -> new Judge0SubmitRequest(
-                            code, languageId, tc.getInput() != null ? tc.getInput() : "", tc.getExpectedOutput()))
+                    .map(tc -> {
+                        String input = judge0ExecutionService.restoreEscapedNewline(tc.getInput());
+                        String expectedOutput = judge0ExecutionService.restoreEscapedNewline(tc.getExpectedOutput());
+                        return new Judge0SubmitRequest(code, languageId, input != null ? input : "", expectedOutput);
+                    })
                     .toList();
 
             List<Judge0SubmitResponse> judgeResponses = judge0ExecutionService.execute(batchRequests);
@@ -72,8 +75,8 @@ public class RunJudgeService {
         if (judgeResponses.isEmpty()) {
             return testCases.stream()
                     .map(tc -> new RunTestCaseResult(
-                            tc.getInput(),
-                            tc.getExpectedOutput(),
+                            judge0ExecutionService.restoreEscapedNewline(tc.getInput()),
+                            judge0ExecutionService.restoreEscapedNewline(tc.getExpectedOutput()),
                             null,
                             "JUDGE_ERROR",
                             "채점 서버 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."))
@@ -83,14 +86,16 @@ public class RunJudgeService {
         return java.util.stream.IntStream.range(0, testCases.size())
                 .mapToObj(i -> {
                     TestCase tc = testCases.get(i);
+                    String input = judge0ExecutionService.restoreEscapedNewline(tc.getInput());
+                    String expectedOutput = judge0ExecutionService.restoreEscapedNewline(tc.getExpectedOutput());
                     if (i >= judgeResponses.size()) {
-                        return new RunTestCaseResult(tc.getInput(), tc.getExpectedOutput(), null, "RE", null);
+                        return new RunTestCaseResult(input, expectedOutput, null, "RE", null);
                     }
                     Judge0SubmitResponse r = judgeResponses.get(i);
                     String status = resolveStatus(r);
                     String actualOutput = r.stdout() != null ? r.stdout().stripTrailing() : null;
                     String stderr = r.stderr() != null ? r.stderr() : r.compileOutput();
-                    return new RunTestCaseResult(tc.getInput(), tc.getExpectedOutput(), actualOutput, status, stderr);
+                    return new RunTestCaseResult(input, expectedOutput, actualOutput, status, stderr);
                 })
                 .toList();
     }

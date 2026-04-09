@@ -202,6 +202,47 @@ class ProblemServiceTest {
     }
 
     @Test
+    @DisplayName("문제 단건 조회 응답은 이스케이프된 개행(\\\\n)을 실제 개행으로 복원한다")
+    void getProblem_unescapesEscapedNewlineFields() {
+        // given
+        Problem problem = mock(Problem.class);
+        TestCase sampleCase = mock(TestCase.class);
+        ProblemLanguageProfile pythonProfile = mock(ProblemLanguageProfile.class);
+
+        when(problem.getId()).thenReturn(1L);
+        when(problem.getTitle()).thenReturn("A + B");
+        when(problem.getDifficulty()).thenReturn(DifficultyLevel.EASY);
+        when(problem.getContent()).thenReturn("line1\\nline2");
+        when(problem.getInputFormat()).thenReturn("input\\nformat");
+        when(problem.getOutputFormat()).thenReturn("output\\nformat");
+        when(problem.getTimeLimitMs()).thenReturn(1000L);
+        when(problem.getMemoryLimitMb()).thenReturn(256L);
+        when(problem.getTestCases()).thenReturn(List.of(sampleCase));
+
+        when(sampleCase.getIsSample()).thenReturn(true);
+        when(sampleCase.getInput()).thenReturn("1\\n2");
+        when(sampleCase.getExpectedOutput()).thenReturn("3\\n4");
+
+        when(pythonProfile.getLanguageCode()).thenReturn("python3");
+        when(pythonProfile.getStarterCode()).thenReturn("def solve():\\n    pass");
+        when(pythonProfile.getIsDefault()).thenReturn(true);
+
+        when(problemRepository.findById(1L)).thenReturn(Optional.of(problem));
+        when(problemLanguageProfileRepository.findByProblemIdOrderByIdAsc(1L)).thenReturn(List.of(pythonProfile));
+
+        // when
+        ProblemDetailResponse response = problemService.getProblem(1L, null);
+
+        // then
+        assertThat(response.content()).isEqualTo("line1\nline2");
+        assertThat(response.inputFormat()).isEqualTo("input\nformat");
+        assertThat(response.outputFormat()).isEqualTo("output\nformat");
+        assertThat(response.starterCodes())
+                .containsExactly(new ProblemDetailResponse.StarterCode("python3", "def solve():\n    pass"));
+        assertThat(response.sampleCases()).containsExactly(new ProblemDetailResponse.SampleCase("1\n2", "3\n4"));
+    }
+
+    @Test
     @DisplayName("문제 ID로 단건 조회 시 lang이 ko여도 번역이 없으면 원문을 반환한다")
     void getProblem_withKoWithoutTranslation_returnsOriginalDetail() {
         // given

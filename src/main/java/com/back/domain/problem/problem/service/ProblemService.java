@@ -73,8 +73,8 @@ public class ProblemService {
                 .orElse(null);
 
         List<ProblemDetailResponse.StarterCode> starterCodes = languageProfiles.stream()
-                .map(profile ->
-                        new ProblemDetailResponse.StarterCode(profile.getLanguageCode(), profile.getStarterCode()))
+                .map(profile -> new ProblemDetailResponse.StarterCode(
+                        profile.getLanguageCode(), restoreEscapedNewline(profile.getStarterCode())))
                 .toList();
 
         List<ProblemDetailResponse.SampleCase> sampleCases = problem.getTestCases().stream()
@@ -84,8 +84,22 @@ public class ProblemService {
 
         String responseLanguage = resolveResponseLanguage(lang, translation);
 
-        return ProblemDetailResponse.from(
+        ProblemDetailResponse response = ProblemDetailResponse.from(
                 problem, translation, responseLanguage, supportedLanguages, defaultLanguage, starterCodes, sampleCases);
+        return new ProblemDetailResponse(
+                response.problemId(),
+                response.title(),
+                response.difficulty(),
+                restoreEscapedNewline(response.content()),
+                restoreEscapedNewline(response.inputFormat()),
+                restoreEscapedNewline(response.outputFormat()),
+                response.timeLimitMs(),
+                response.memoryLimitMb(),
+                response.language(),
+                response.supportedLanguages(),
+                response.defaultLanguage(),
+                response.starterCodes(),
+                response.sampleCases());
     }
 
     private ProblemTranslation findTranslationIfNeeded(Long problemId, String lang) {
@@ -110,6 +124,14 @@ public class ProblemService {
     }
 
     private ProblemDetailResponse.SampleCase toSampleCase(TestCase testCase) {
-        return new ProblemDetailResponse.SampleCase(testCase.getInput(), testCase.getExpectedOutput());
+        return new ProblemDetailResponse.SampleCase(
+                restoreEscapedNewline(testCase.getInput()), restoreEscapedNewline(testCase.getExpectedOutput()));
+    }
+
+    private String restoreEscapedNewline(String value) {
+        if (value == null) {
+            return null;
+        }
+        return value.replace("\r\n", "\n").replace("\\r\\n", "\n").replace("\\n", "\n");
     }
 }

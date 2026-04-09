@@ -26,4 +26,11 @@ public class ProblemTagConnect extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "tag_id")
     private Tag tag;
+
+    public static ProblemTagConnect create(Problem problem, Tag tag) {
+        ProblemTagConnect connect = new ProblemTagConnect();
+        connect.problem = problem;
+        connect.tag = tag;
+        return connect;
+    }
 }

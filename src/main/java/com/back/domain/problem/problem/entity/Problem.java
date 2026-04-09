@@ -21,7 +21,8 @@ import lombok.NoArgsConstructor;
 public class Problem extends BaseEntity {
     @Id
     @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "problem_seq_gen")
-    @SequenceGenerator(name = "problem_seq_gen", sequenceName = "problem_id_seq", allocationSize = 50)
+    // 문제 ID는 관리자 화면/운영 확인 편의를 위해 1씩 증가하도록 유지한다.
+    @SequenceGenerator(name = "problem_seq_gen", sequenceName = "problem_id_seq", allocationSize = 1)
     private Long id;
 
     @Column(name = "source_problem_id", unique = true, length = 50)
@@ -71,4 +72,97 @@ public class Problem extends BaseEntity {
 
     @OneToMany(mappedBy = "problem")
     private List<TestCase> testCases = new ArrayList<>();
+
+    public static Problem create(
+            String sourceProblemId,
+            String title,
+            DifficultyLevel difficulty,
+            String content,
+            Integer difficultyRating,
+            Long timeLimitMs,
+            Long memoryLimitMb,
+            String inputFormat,
+            String outputFormat,
+            InputMode inputMode,
+            JudgeType judgeType,
+            String checkerCode) {
+        Problem problem = new Problem();
+        problem.apply(
+                sourceProblemId,
+                title,
+                difficulty,
+                content,
+                difficultyRating,
+                timeLimitMs,
+                memoryLimitMb,
+                inputFormat,
+                outputFormat,
+                inputMode,
+                judgeType,
+                checkerCode);
+        return problem;
+    }
+
+    public void update(
+            String sourceProblemId,
+            String title,
+            DifficultyLevel difficulty,
+            String content,
+            Integer difficultyRating,
+            Long timeLimitMs,
+            Long memoryLimitMb,
+            String inputFormat,
+            String outputFormat,
+            InputMode inputMode,
+            JudgeType judgeType,
+            String checkerCode) {
+        apply(
+                sourceProblemId,
+                title,
+                difficulty,
+                content,
+                difficultyRating,
+                timeLimitMs,
+                memoryLimitMb,
+                inputFormat,
+                outputFormat,
+                inputMode,
+                judgeType,
+                checkerCode);
+    }
+
+    private void apply(
+            String sourceProblemId,
+            String title,
+            DifficultyLevel difficulty,
+            String content,
+            Integer difficultyRating,
+            Long timeLimitMs,
+            Long memoryLimitMb,
+            String inputFormat,
+            String outputFormat,
+            InputMode inputMode,
+            JudgeType judgeType,
+            String checkerCode) {
+        this.sourceProblemId = normalizeSourceProblemId(sourceProblemId);
+        this.title = title;
+        this.difficulty = difficulty;
+        this.content = content;
+        this.difficultyRating = difficultyRating;
+        this.timeLimitMs = timeLimitMs;
+        this.memoryLimitMb = memoryLimitMb;
+        this.inputFormat = inputFormat;
+        this.outputFormat = outputFormat;
+        this.inputMode = inputMode != null ? inputMode : InputMode.STDIO;
+        this.judgeType = judgeType != null ? judgeType : JudgeType.EXACT;
+        this.checkerCode = checkerCode;
+    }
+
+    private String normalizeSourceProblemId(String sourceProblemId) {
+        if (sourceProblemId == null) {
+            return null;
+        }
+        String normalized = sourceProblemId.trim();
+        return normalized.isEmpty() ? null : normalized;
+    }
 }

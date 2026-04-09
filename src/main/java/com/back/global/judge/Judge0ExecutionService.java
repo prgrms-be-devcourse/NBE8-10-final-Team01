@@ -84,4 +84,14 @@ public class Judge0ExecutionService {
             default -> throw new IllegalArgumentException("지원하지 않는 언어: " + language);
         };
     }
+
+    /**
+     * 관리자 JSON 업로드에서 '\\n' 문자열이 저장된 과거 데이터를 런타임에서 안전하게 복원한다.
+     */
+    public String restoreEscapedNewline(String value) {
+        if (value == null) {
+            return null;
+        }
+        return value.replace("\r\n", "\n").replace("\\r\\n", "\n").replace("\\n", "\n");
+    }
 }

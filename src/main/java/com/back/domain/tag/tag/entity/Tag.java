@@ -19,4 +19,10 @@ public class Tag extends BaseEntity {
 
     @Column(nullable = false, unique = true)
     private String name;
+
+    public static Tag create(String name) {
+        Tag tag = new Tag();
+        tag.name = name;
+        return tag;
+    }
 }

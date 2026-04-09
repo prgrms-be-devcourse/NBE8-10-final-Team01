@@ -76,6 +76,7 @@ class JudgeServiceTest {
 
         when(submissionRepository.findById(SUBMISSION_ID)).thenReturn(Optional.of(submission));
         when(judge0ExecutionService.getLanguageId("python")).thenReturn(71);
+        when(judge0ExecutionService.restoreEscapedNewline(any())).thenAnswer(invocation -> invocation.getArgument(0));
     }
 
     private TestCase mockTestCase(String input, String expectedOutput) {
