@@ -14,6 +14,7 @@ import com.back.domain.problem.solo.submission.repository.SoloSubmissionReposito
 import com.back.domain.problem.submission.entity.SubmissionResult;
 import com.back.domain.problem.testcase.entity.TestCase;
 import com.back.domain.rating.profile.service.RatingProfileService;
+import com.back.domain.review.reviewschedule.service.ReviewScheduleService;
 import com.back.global.judge.dto.Judge0SubmitRequest;
 import com.back.global.judge.dto.Judge0SubmitResponse;
 import com.back.global.judge.event.SoloJudgeRequestedEvent;
@@ -30,6 +31,7 @@ public class SoloJudgeService {
     private final Judge0ExecutionService judge0ExecutionService;
     private final SoloSubmissionRepository soloSubmissionRepository;
     private final RatingProfileService ratingProfileService;
+    private final ReviewScheduleService reviewScheduleService;
     private final WebSocketMessagePublisher publisher;
 
     @Async
@@ -71,9 +73,10 @@ public class SoloJudgeService {
         soloSubmissionRepository.save(submission);
 
         if (judgeResult == SubmissionResult.AC) {
+            LocalDateTime now = LocalDateTime.now();
             // 문제별 첫 AC일 때만 솔로 난이도 점수/카운트를 반영한다.
-            ratingProfileService.applySoloFirstSolve(
-                    submission.getMember(), submission.getProblem(), LocalDateTime.now());
+            ratingProfileService.applySoloFirstSolve(submission.getMember(), submission.getProblem(), now);
+            reviewScheduleService.recordAcResult(submission.getMember(), submission.getProblem(), now);
         }
 
         publisher.publish(
