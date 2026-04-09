@@ -28,16 +28,22 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class RatingProfileService {
 
-    private static final int INITIAL_SKILL_RATING = 1000;
-    private static final int MIN_SKILL_RATING = 900;
-    private static final int PLACEMENT_BOOST_MATCH_COUNT = 20;
+    private static final int INITIAL_SKILL_RATING = 0;
+    private static final int MIN_SKILL_RATING = 0;
     private static final double ELO_BASE = 400.0d;
-    private static final int EARLY_K = 64;
+    private static final int PLACEMENT_STAGE_1_MATCH_COUNT = 2;
+    private static final int PLACEMENT_STAGE_2_MATCH_COUNT = 10;
+    private static final int PLACEMENT_STAGE_3_MATCH_COUNT = 30;
+    private static final int STAGE_1_K = 64;
+    private static final int STAGE_2_K = 48;
+    private static final int STAGE_3_K = 32;
     private static final int NORMAL_K = 24;
     private static final int MAX_DELTA_PER_MATCH = 35;
     private static final double EARLY_LOSS_REDUCTION_MULTIPLIER = 0.5d;
     private static final int LOSS_STREAK_ACTIVATION = 3;
     private static final int BRONZE_SILVER_LOSS_STREAK_DELTA_FLOOR = -12;
+    private static final int FORFEIT_PENALTY = -10;
+    private static final int THIRD_PLACE_MIN_REWARD = 1;
 
     // Codeforces rating(800~3500+) 기준으로 first solve 보너스를 10~20 사이로 축소한다.
     private static final int FIRST_SOLVE_BASE_RATING = 800;
@@ -45,7 +51,6 @@ public class RatingProfileService {
     private static final int FIRST_SOLVE_MIN_SCORE = 10;
     private static final int FIRST_SOLVE_MAX_SCORE = 20;
 
-    private static final int HARD_MATCH_DIFFICULTY = 2000;
     private static final int TOP2_WINDOW_SIZE = 20;
     private static final int GOD_SEAT_LIMIT = 5;
 
@@ -53,7 +58,11 @@ public class RatingProfileService {
     private final MemberProblemFirstSolveRepository memberProblemFirstSolveRepository;
     private final BattleParticipantRepository battleParticipantRepository;
 
-    public record BattlePlacement(Member member, int rank) {}
+    public record BattlePlacement(Member member, int rank, boolean forfeited) {
+        public BattlePlacement(Member member, int rank) {
+            this(member, rank, false);
+        }
+    }
 
     @Transactional
     public void ensureProfile(Member member) {
@@ -61,13 +70,19 @@ public class RatingProfileService {
     }
 
     @Transactional
-    public void applyBattlePlacements(List<BattlePlacement> placements, Integer problemDifficultyRating) {
+    public Map<Long, Integer> applyBattlePlacements(List<BattlePlacement> placements, Integer problemDifficultyRating) {
+        Map<Long, Integer> ratingDeltaByMemberId = new HashMap<>();
         if (placements == null || placements.isEmpty()) {
-            return;
+            return ratingDeltaByMemberId;
         }
         if (!isRankedDifficulty(problemDifficultyRating)) {
             // 원본 rating이 없거나 비정상인 문제는 랭크 정산 대상에서 제외한다.
-            return;
+            for (BattlePlacement placement : placements) {
+                if (placement.member() != null && placement.member().getId() != null) {
+                    ratingDeltaByMemberId.put(placement.member().getId(), 0);
+                }
+            }
+            return ratingDeltaByMemberId;
         }
 
         int participantCount = placements.size();
@@ -101,13 +116,12 @@ public class RatingProfileService {
             double expectedScore = calculateExpectedScore(memberId, myRating, skillSnapshot);
             double actualScore = calculateActualScore(placement.rank(), participantCount);
 
-            // 배치 구간(초반 20판)은 K를 크게 두어 강한 유저가 빠르게 제자리 티어로 수렴하게 한다.
             int matchCount = matchCountSnapshot.getOrDefault(memberId, 0);
-            int kFactor = matchCount < PLACEMENT_BOOST_MATCH_COUNT ? EARLY_K : NORMAL_K;
+            int kFactor = resolveKFactor(matchCount);
             double rawDelta = kFactor * (actualScore - expectedScore);
 
-            if (rawDelta < 0 && matchCount < PLACEMENT_BOOST_MATCH_COUNT) {
-                // 초반 배치 구간에서는 패배 하락폭을 절반으로 완화해 진입 장벽을 낮춘다.
+            if (rawDelta < 0 && matchCount < PLACEMENT_STAGE_2_MATCH_COUNT) {
+                // 초반 구간에서는 패배 하락폭을 절반으로 완화해 초보 진입 장벽을 낮춘다.
                 rawDelta *= EARLY_LOSS_REDUCTION_MULTIPLIER;
             } else if (rawDelta > 0) {
                 // 상승분에만 난이도/상대차 감쇠를 걸어 양학 인플레를 줄인다.
@@ -120,21 +134,23 @@ public class RatingProfileService {
             // 1판 변동 상한으로 급격한 오버슈팅/언더슈팅을 막는다.
             int delta = clamp((int) Math.round(rawDelta), -MAX_DELTA_PER_MATCH, MAX_DELTA_PER_MATCH);
             delta = applyBronzeSilverLossStreakProtection(memberId, profile, placement.rank(), delta);
+            if (!placement.forfeited() && placement.rank() == 3) {
+                // 3등은 최소 +1을 보장해 참여 동기를 유지한다.
+                delta = Math.max(delta, THIRD_PLACE_MIN_REWARD);
+            }
+            if (placement.forfeited()) {
+                delta += FORFEIT_PENALTY;
+            }
             int finalBattleDelta = applyRatingFloor(myRating, delta);
             profile.applyBattleRatingDelta(finalBattleDelta);
             profile.increaseBattleMatchCount();
 
-            // Hard SR은 하드 문제 배틀(2000+)에서만 별도 누적한다.
-            if (isHardMatch(problemDifficultyRating)) {
-                int currentHardRating = toSkillRating(profile.getHardBattleRating());
-                int finalHardDelta = applyRatingFloor(currentHardRating, delta);
-                profile.applyHardBattleRatingDelta(finalHardDelta);
-            }
-
             refreshTier(profile);
+            ratingDeltaByMemberId.put(memberId, finalBattleDelta);
         }
 
         synchronizeGodTop5();
+        return ratingDeltaByMemberId;
     }
 
     @Transactional
@@ -190,7 +206,6 @@ public class RatingProfileService {
     private void refreshTier(MemberRatingProfile profile) {
         Long memberId = profile.getMember().getId();
         int battleRating = toSkillRating(profile.getBattleRating());
-        int hardBattleRating = toSkillRating(profile.getHardBattleRating());
         int activityPoint = profile.getFirstSolveScore() == null ? 0 : profile.getFirstSolveScore();
         long solved1400Plus =
                 memberProblemFirstSolveRepository.countByMemberIdAndProblemDifficultyRatingGreaterThanEqual(
@@ -211,7 +226,6 @@ public class RatingProfileService {
         profile.updateTierScore(battleRating);
         profile.updateTier(TierPolicy.resolveTier(
                 battleRating,
-                hardBattleRating,
                 activityPoint,
                 solved1400Plus,
                 solved1700Plus,
@@ -220,10 +234,10 @@ public class RatingProfileService {
                 recentTop2Ratio));
     }
 
-    // GOD은 MASTER_1 후보군 중 Hard SR 상위 5명에게만 부여한다.
+    // GOD은 MASTER_1 후보군 중 SR 상위 5명에게만 부여한다.
     private void synchronizeGodTop5() {
         List<MemberRatingProfile> candidates =
-                memberRatingProfileRepository.findAllByTierInOrderByHardBattleRatingDescBattleRatingDescMemberIdAsc(
+                memberRatingProfileRepository.findAllByTierInOrderByBattleRatingDescFirstSolveScoreDescMemberIdAsc(
                         List.of(RatingTier.GOD, RatingTier.MASTER_1));
         if (candidates == null || candidates.isEmpty()) {
             return;
@@ -255,6 +269,13 @@ public class RatingProfileService {
 
     private int toSkillRating(Integer rawRating) {
         return rawRating == null ? INITIAL_SKILL_RATING : rawRating;
+    }
+
+    private int resolveKFactor(int matchCount) {
+        if (matchCount < PLACEMENT_STAGE_1_MATCH_COUNT) return STAGE_1_K;
+        if (matchCount < PLACEMENT_STAGE_2_MATCH_COUNT) return STAGE_2_K;
+        if (matchCount < PLACEMENT_STAGE_3_MATCH_COUNT) return STAGE_3_K;
+        return NORMAL_K;
     }
 
     private double calculateExpectedScore(Long memberId, int myRating, Map<Long, Integer> skillSnapshot) {
@@ -330,10 +351,6 @@ public class RatingProfileService {
         }
 
         return 0;
-    }
-
-    private boolean isHardMatch(Integer difficultyRating) {
-        return difficultyRating != null && difficultyRating >= HARD_MATCH_DIFFICULTY;
     }
 
     private boolean isRankedDifficulty(Integer difficultyRating) {

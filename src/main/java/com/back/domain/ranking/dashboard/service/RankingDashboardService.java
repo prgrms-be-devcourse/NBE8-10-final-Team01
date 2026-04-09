@@ -20,6 +20,8 @@ import com.back.domain.ranking.dashboard.repository.RankingDashboardQueryReposit
 import com.back.domain.ranking.dashboard.repository.RankingDashboardQueryRepository.BattleTrendRow;
 import com.back.domain.ranking.dashboard.repository.RankingDashboardQueryRepository.MemberRankRow;
 import com.back.domain.ranking.dashboard.repository.RankingDashboardQueryRepository.TierSourceRow;
+import com.back.domain.rating.policy.TierPolicy;
+import com.back.domain.rating.profile.entity.RatingTier;
 import com.back.global.exception.ServiceException;
 
 import lombok.RequiredArgsConstructor;
@@ -29,41 +31,41 @@ import lombok.RequiredArgsConstructor;
 // 메인 홈 대시보드 응답을 조립하고 화면용 계산값을 보정한다.
 public class RankingDashboardService {
 
-    private static final int TREND_LIMIT = 7;
+    private static final int TREND_LIMIT = 20;
     private static final int TOP2_WINDOW_SIZE = 20;
     private static final int NEARBY_RANKING_RADIUS = 2;
 
     // 대시보드에서 쓰는 티어 컷 기준이다.
     private static final List<TierCut> TIER_CUTS = List.of(
-            new TierCut("BRONZE_5", 900),
-            new TierCut("BRONZE_4", 1060),
-            new TierCut("BRONZE_3", 1120),
-            new TierCut("BRONZE_2", 1180),
-            new TierCut("BRONZE_1", 1240),
-            new TierCut("SILVER_5", 1300),
-            new TierCut("SILVER_4", 1360),
-            new TierCut("SILVER_3", 1420),
-            new TierCut("SILVER_2", 1480),
-            new TierCut("SILVER_1", 1540),
-            new TierCut("GOLD_5", 1600),
-            new TierCut("GOLD_4", 1660),
-            new TierCut("GOLD_3", 1720),
-            new TierCut("GOLD_2", 1780),
-            new TierCut("GOLD_1", 1840),
-            new TierCut("PLATINUM_5", 1900),
-            new TierCut("PLATINUM_4", 1960),
-            new TierCut("PLATINUM_3", 2020),
-            new TierCut("PLATINUM_2", 2080),
-            new TierCut("PLATINUM_1", 2140),
-            new TierCut("DIAMOND_5", 2200),
-            new TierCut("DIAMOND_4", 2260),
-            new TierCut("DIAMOND_3", 2320),
-            new TierCut("DIAMOND_2", 2380),
-            new TierCut("DIAMOND_1", 2440),
-            new TierCut("MASTER_4", 2500),
-            new TierCut("MASTER_3", 2575),
-            new TierCut("MASTER_2", 2650),
-            new TierCut("MASTER_1", 2725),
+            new TierCut("BRONZE_5", 0),
+            new TierCut("BRONZE_4", 60),
+            new TierCut("BRONZE_3", 120),
+            new TierCut("BRONZE_2", 180),
+            new TierCut("BRONZE_1", 240),
+            new TierCut("SILVER_5", 300),
+            new TierCut("SILVER_4", 360),
+            new TierCut("SILVER_3", 420),
+            new TierCut("SILVER_2", 480),
+            new TierCut("SILVER_1", 540),
+            new TierCut("GOLD_5", 600),
+            new TierCut("GOLD_4", 660),
+            new TierCut("GOLD_3", 720),
+            new TierCut("GOLD_2", 780),
+            new TierCut("GOLD_1", 840),
+            new TierCut("PLATINUM_5", 900),
+            new TierCut("PLATINUM_4", 960),
+            new TierCut("PLATINUM_3", 1020),
+            new TierCut("PLATINUM_2", 1080),
+            new TierCut("PLATINUM_1", 1140),
+            new TierCut("DIAMOND_5", 1200),
+            new TierCut("DIAMOND_4", 1260),
+            new TierCut("DIAMOND_3", 1320),
+            new TierCut("DIAMOND_2", 1380),
+            new TierCut("DIAMOND_1", 1440),
+            new TierCut("MASTER_4", 1500),
+            new TierCut("MASTER_3", 1575),
+            new TierCut("MASTER_2", 1650),
+            new TierCut("MASTER_1", 1725),
             new TierCut("GOD", Long.MAX_VALUE));
 
     private final RankingDashboardQueryRepository queryRepository;
@@ -80,7 +82,8 @@ public class RankingDashboardService {
 
         LocalDateTime now = LocalDateTime.now();
         long battleRating = member.battleRating();
-        String currentTier = displayTier(member.tier(), battleRating);
+        String currentTier =
+                displayTier(member.tier(), member.battleMatchCount(), member.firstSolvedProblemCount(), battleRating);
         String nextTier = resolveNextTier(currentTier);
         BattleSummary battleSummary = queryRepository.findBattleSummary(memberId, TOP2_WINDOW_SIZE);
 
@@ -182,7 +185,8 @@ public class RankingDashboardService {
                         row.rank(),
                         row.memberId(),
                         row.nickname(),
-                        displayTier(row.tier(), row.battleRating()),
+                        displayTier(
+                                row.tier(), row.battleMatchCount(), row.firstSolvedProblemCount(), row.battleRating()),
                         row.battleRating(),
                         row.memberId().equals(memberId)))
                 .toList();
@@ -192,7 +196,10 @@ public class RankingDashboardService {
         List<TierSourceRow> rows = queryRepository.findTierSources();
         long totalCount = rows.size();
         Map<String, Long> tierCounts = new LinkedHashMap<>();
-        rows.forEach(row -> tierCounts.merge(displayTier(row.tier(), row.battleRating()), 1L, Long::sum));
+        rows.forEach(row -> tierCounts.merge(
+                displayTier(row.tier(), row.battleMatchCount(), row.firstSolvedProblemCount(), row.battleRating()),
+                1L,
+                Long::sum));
 
         return tierCounts.entrySet().stream()
                 .sorted(Comparator.comparingInt(entry -> tierOrder(entry.getKey())))
@@ -204,12 +211,21 @@ public class RankingDashboardService {
                 .toList();
     }
 
-    private String displayTier(String rawTier, long score) {
+    private String displayTier(String rawTier, int battleMatchCount, int firstSolvedProblemCount, long score) {
+        RatingTier parsedTier = null;
         if (rawTier != null && !rawTier.isBlank()) {
-            String normalizedTier = rawTier.trim();
-            if ("UNRANKED".equals(normalizedTier) || tierOrder(normalizedTier) >= 0) {
-                return normalizedTier;
+            try {
+                parsedTier = RatingTier.valueOf(rawTier.trim());
+            } catch (IllegalArgumentException ignored) {
+                parsedTier = null;
             }
+        }
+        String resolved = TierPolicy.resolveDisplayTier(parsedTier, battleMatchCount, firstSolvedProblemCount);
+        if (!"UNRANKED".equals(resolved)) {
+            return resolved;
+        }
+        if (battleMatchCount == 0 && firstSolvedProblemCount == 0) {
+            return "UNRANKED";
         }
         return deriveTierFromScore(score);
     }

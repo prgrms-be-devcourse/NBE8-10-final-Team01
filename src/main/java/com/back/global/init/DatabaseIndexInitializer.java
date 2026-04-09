@@ -31,10 +31,6 @@ public class DatabaseIndexInitializer {
                 ADD COLUMN IF NOT EXISTS first_solved_problem_count INTEGER
                 """);
         jdbcTemplate.execute("""
-                ALTER TABLE member_rating_profiles
-                ADD COLUMN IF NOT EXISTS hard_battle_rating INTEGER
-                """);
-        jdbcTemplate.execute("""
                 DO $$
                 BEGIN
                     IF EXISTS (
@@ -50,32 +46,19 @@ public class DatabaseIndexInitializer {
                     END IF;
                 END $$;
                 """);
-        // 새 레이팅 체계 기본값: SR/Hard SR 기본점을 1000으로 맞춘다.
+        // 새 레이팅 체계 기본값: SR/AP는 0점에서 시작한다.
         jdbcTemplate.execute("""
                 UPDATE member_rating_profiles
                 SET battle_rating = CASE
-                    WHEN battle_rating IS NULL OR battle_rating = 0 THEN 1000
+                    WHEN battle_rating IS NULL THEN 0
                     ELSE battle_rating
                 END
                 """);
         jdbcTemplate.execute("""
                 UPDATE member_rating_profiles
-                SET hard_battle_rating = COALESCE(
-                    hard_battle_rating,
-                    CASE
-                        WHEN battle_rating IS NULL OR battle_rating = 0 THEN 1000
-                        ELSE battle_rating
-                    END
-                )
-                """);
-        jdbcTemplate.execute("""
-                UPDATE member_rating_profiles
                 SET tier_score = COALESCE(
                     tier_score,
-                    CASE
-                        WHEN battle_rating IS NULL OR battle_rating = 0 THEN 1000
-                        ELSE battle_rating
-                    END
+                    COALESCE(battle_rating, 0)
                 )
                 """);
         jdbcTemplate.execute("""
@@ -112,8 +95,7 @@ public class DatabaseIndexInitializer {
                 ON member_rating_profiles (battle_rating DESC, member_id ASC)
                 """);
         jdbcTemplate.execute("""
-                CREATE INDEX IF NOT EXISTS idx_member_rating_profiles_hard_battle_rating
-                ON member_rating_profiles (hard_battle_rating DESC, member_id ASC)
+                DROP INDEX IF EXISTS idx_member_rating_profiles_hard_battle_rating
                 """);
         jdbcTemplate.execute("""
                 CREATE INDEX IF NOT EXISTS idx_member_rating_profiles_first_solve_score
@@ -128,7 +110,7 @@ public class DatabaseIndexInitializer {
                 ON member_problem_first_solves (first_solved_at DESC)
                 """);
         log.info("DB index 확인 완료 - uq_one_playing_per_member, idx_member_rating_profiles_tier_score,"
-                + " idx_member_rating_profiles_battle_rating, idx_member_rating_profiles_hard_battle_rating,"
+                + " idx_member_rating_profiles_battle_rating,"
                 + " idx_member_rating_profiles_first_solve_score, idx_mpfs_member_id, idx_mpfs_first_solved_at");
     }
 }

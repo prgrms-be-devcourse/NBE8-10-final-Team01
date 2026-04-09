@@ -12,14 +12,13 @@ public final class TierPolicy {
     // 티어는 SR 기반 후보와 AP/난이도 게이트 상한을 동시에 만족해야 한다.
     public static RatingTier resolveTier(
             Integer skillRating,
-            Integer hardSkillRating,
             Integer activityPoint,
             long solved1400Plus,
             long solved1700Plus,
             long solved2000Plus,
             long solved2300Plus,
             double recentTop2Ratio) {
-        RatingTier srTier = resolveSkillTier(skillRating == null ? 1000 : skillRating);
+        RatingTier srTier = resolveSkillTier(skillRating == null ? 0 : skillRating);
         RatingTier gateTier = resolveGateTier(
                 activityPoint == null ? 0 : activityPoint,
                 solved1400Plus,
@@ -27,14 +26,9 @@ public final class TierPolicy {
                 solved2000Plus,
                 solved2300Plus,
                 recentTop2Ratio);
-        RatingTier hardTier = resolveHardTier(hardSkillRating == null ? 1000 : hardSkillRating);
 
         // 1) SR 컷라인 후보와 2) 활동/난이도 게이트 상한 중 더 낮은 쪽을 적용한다.
         RatingTier resolved = lowerTier(srTier, gateTier);
-        if (isAtLeast(resolved, RatingTier.DIAMOND_5)) {
-            // 다이아 이상은 Hard SR 컷라인을 추가로 통과해야 한다.
-            resolved = lowerTier(resolved, hardTier);
-        }
 
         if (resolved == RatingTier.GOD) {
             // GOD은 전역 TOP 좌석제로만 부여한다.
@@ -44,55 +38,40 @@ public final class TierPolicy {
     }
 
     private static RatingTier resolveSkillTier(int skillRating) {
-        if (skillRating >= 2725) return RatingTier.MASTER_1;
-        if (skillRating >= 2650) return RatingTier.MASTER_2;
-        if (skillRating >= 2575) return RatingTier.MASTER_3;
-        if (skillRating >= 2500) return RatingTier.MASTER_4;
+        if (skillRating >= 1725) return RatingTier.MASTER_1;
+        if (skillRating >= 1650) return RatingTier.MASTER_2;
+        if (skillRating >= 1575) return RatingTier.MASTER_3;
+        if (skillRating >= 1500) return RatingTier.MASTER_4;
 
-        if (skillRating >= 2440) return RatingTier.DIAMOND_1;
-        if (skillRating >= 2380) return RatingTier.DIAMOND_2;
-        if (skillRating >= 2320) return RatingTier.DIAMOND_3;
-        if (skillRating >= 2260) return RatingTier.DIAMOND_4;
-        if (skillRating >= 2200) return RatingTier.DIAMOND_5;
+        if (skillRating >= 1440) return RatingTier.DIAMOND_1;
+        if (skillRating >= 1380) return RatingTier.DIAMOND_2;
+        if (skillRating >= 1320) return RatingTier.DIAMOND_3;
+        if (skillRating >= 1260) return RatingTier.DIAMOND_4;
+        if (skillRating >= 1200) return RatingTier.DIAMOND_5;
 
-        if (skillRating >= 2140) return RatingTier.PLATINUM_1;
-        if (skillRating >= 2080) return RatingTier.PLATINUM_2;
-        if (skillRating >= 2020) return RatingTier.PLATINUM_3;
-        if (skillRating >= 1960) return RatingTier.PLATINUM_4;
-        if (skillRating >= 1900) return RatingTier.PLATINUM_5;
+        if (skillRating >= 1140) return RatingTier.PLATINUM_1;
+        if (skillRating >= 1080) return RatingTier.PLATINUM_2;
+        if (skillRating >= 1020) return RatingTier.PLATINUM_3;
+        if (skillRating >= 960) return RatingTier.PLATINUM_4;
+        if (skillRating >= 900) return RatingTier.PLATINUM_5;
 
-        if (skillRating >= 1840) return RatingTier.GOLD_1;
-        if (skillRating >= 1780) return RatingTier.GOLD_2;
-        if (skillRating >= 1720) return RatingTier.GOLD_3;
-        if (skillRating >= 1660) return RatingTier.GOLD_4;
-        if (skillRating >= 1600) return RatingTier.GOLD_5;
+        if (skillRating >= 840) return RatingTier.GOLD_1;
+        if (skillRating >= 780) return RatingTier.GOLD_2;
+        if (skillRating >= 720) return RatingTier.GOLD_3;
+        if (skillRating >= 660) return RatingTier.GOLD_4;
+        if (skillRating >= 600) return RatingTier.GOLD_5;
 
-        if (skillRating >= 1540) return RatingTier.SILVER_1;
-        if (skillRating >= 1480) return RatingTier.SILVER_2;
-        if (skillRating >= 1420) return RatingTier.SILVER_3;
-        if (skillRating >= 1360) return RatingTier.SILVER_4;
-        if (skillRating >= 1300) return RatingTier.SILVER_5;
+        if (skillRating >= 540) return RatingTier.SILVER_1;
+        if (skillRating >= 480) return RatingTier.SILVER_2;
+        if (skillRating >= 420) return RatingTier.SILVER_3;
+        if (skillRating >= 360) return RatingTier.SILVER_4;
+        if (skillRating >= 300) return RatingTier.SILVER_5;
 
-        if (skillRating >= 1240) return RatingTier.BRONZE_1;
-        if (skillRating >= 1180) return RatingTier.BRONZE_2;
-        if (skillRating >= 1120) return RatingTier.BRONZE_3;
-        if (skillRating >= 1060) return RatingTier.BRONZE_4;
+        if (skillRating >= 240) return RatingTier.BRONZE_1;
+        if (skillRating >= 180) return RatingTier.BRONZE_2;
+        if (skillRating >= 120) return RatingTier.BRONZE_3;
+        if (skillRating >= 60) return RatingTier.BRONZE_4;
         return RatingTier.BRONZE_5;
-    }
-
-    private static RatingTier resolveHardTier(int hardSkillRating) {
-        if (hardSkillRating >= 2725) return RatingTier.MASTER_1;
-        if (hardSkillRating >= 2650) return RatingTier.MASTER_2;
-        if (hardSkillRating >= 2575) return RatingTier.MASTER_3;
-        if (hardSkillRating >= 2500) return RatingTier.MASTER_4;
-
-        if (hardSkillRating >= 2440) return RatingTier.DIAMOND_1;
-        if (hardSkillRating >= 2380) return RatingTier.DIAMOND_2;
-        if (hardSkillRating >= 2320) return RatingTier.DIAMOND_3;
-        if (hardSkillRating >= 2260) return RatingTier.DIAMOND_4;
-        if (hardSkillRating >= 2200) return RatingTier.DIAMOND_5;
-
-        return RatingTier.PLATINUM_1;
     }
 
     private static RatingTier resolveGateTier(
@@ -126,10 +105,6 @@ public final class TierPolicy {
             return RatingTier.SILVER_1;
         }
         return RatingTier.BRONZE_1;
-    }
-
-    private static boolean isAtLeast(RatingTier current, RatingTier standard) {
-        return current.ordinal() >= standard.ordinal();
     }
 
     private static RatingTier lowerTier(RatingTier first, RatingTier second) {

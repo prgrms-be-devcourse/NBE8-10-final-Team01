@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.junit.jupiter.api.DisplayName;
@@ -187,11 +188,12 @@ class BattleResultServiceTest {
         when(participant.getId()).thenReturn(11L);
         when(participant.getStatus()).thenReturn(BattleParticipantStatus.ABANDONED);
         when(participant.getMember()).thenReturn(member);
+        when(member.getId()).thenReturn(101L);
+        when(ratingProfileService.applyBattlePlacements(any(), eq(1200))).thenReturn(Map.of(101L, -10));
 
         withAfterCommit(() -> battleResultService.settle(1L));
 
-        verify(participant).applyResult(1, -5L);
-        verify(member).applyScore(-5L);
+        verify(participant).applyResult(1, -10L);
         verify(participant, never()).timeout();
     }
 
@@ -211,11 +213,12 @@ class BattleResultServiceTest {
         when(participant.getId()).thenReturn(22L);
         when(participant.getStatus()).thenReturn(BattleParticipantStatus.QUIT);
         when(participant.getMember()).thenReturn(member);
+        when(member.getId()).thenReturn(202L);
+        when(ratingProfileService.applyBattlePlacements(any(), eq(1200))).thenReturn(Map.of(202L, -10));
 
         withAfterCommit(() -> battleResultService.settle(2L));
 
-        verify(participant).applyResult(1, -5L);
-        verify(member).applyScore(-5L);
+        verify(participant).applyResult(1, -10L);
     }
 
     private void withAfterCommit(Runnable action) {

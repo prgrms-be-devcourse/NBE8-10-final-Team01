@@ -22,7 +22,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 // 메인 홈 대시보드에 필요한 랭킹/배틀 집계 전용 조회를 모아둔다.
 public class RankingDashboardQueryRepository {
-    private static final long DEFAULT_BATTLE_RATING = 1000L;
+    private static final long DEFAULT_BATTLE_RATING = 0L;
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
 
@@ -33,14 +33,18 @@ public class RankingDashboardQueryRepository {
                         m.id as member_id,
                         m.nickname,
                         mrp.tier,
-                        coalesce(m.score, 0) as score,
+                        coalesce(mrp.battle_rating, :defaultBattleRating) as score,
                         coalesce(mrp.battle_rating, :defaultBattleRating) as battle_rating,
-                        row_number() over (order by coalesce(mrp.battle_rating, :defaultBattleRating) desc, m.id asc) as rank_no,
+                        coalesce(mrp.battle_match_count, 0) as battle_match_count,
+                        coalesce(mrp.first_solved_problem_count, 0) as first_solved_problem_count,
+                        row_number() over (
+                            order by coalesce(mrp.battle_rating, :defaultBattleRating) desc, m.id asc
+                        ) as rank_no,
                         count(*) over () as total_count
                     from members m
                     left join member_rating_profiles mrp on mrp.member_id = m.id
                 )
-                select member_id, nickname, tier, score, battle_rating, rank_no, total_count
+                select member_id, nickname, tier, score, battle_rating, battle_match_count, first_solved_problem_count, rank_no, total_count
                 from ranked
                 where member_id = :memberId
                 """;
@@ -54,6 +58,8 @@ public class RankingDashboardQueryRepository {
                         rs.getString("tier"),
                         getLong(rs, "score"),
                         getLong(rs, "battle_rating"),
+                        getInt(rs, "battle_match_count"),
+                        getInt(rs, "first_solved_problem_count"),
                         getLong(rs, "rank_no"),
                         getLong(rs, "total_count")));
     }
@@ -151,6 +157,8 @@ public class RankingDashboardQueryRepository {
                         m.nickname,
                         mrp.tier,
                         coalesce(mrp.battle_rating, :defaultBattleRating) as battle_rating,
+                        coalesce(mrp.battle_match_count, 0) as battle_match_count,
+                        coalesce(mrp.first_solved_problem_count, 0) as first_solved_problem_count,
                         row_number() over (
                             order by coalesce(mrp.battle_rating, :defaultBattleRating) desc, m.id asc
                         ) as rank_no
@@ -162,7 +170,7 @@ public class RankingDashboardQueryRepository {
                     from ranked
                     where member_id = :memberId
                 )
-                select r.rank_no, r.member_id, r.nickname, r.tier, r.battle_rating
+                select r.rank_no, r.member_id, r.nickname, r.tier, r.battle_rating, r.battle_match_count, r.first_solved_problem_count
                 from ranked r
                 cross join me
                 where r.rank_no between me.rank_no - :radius and me.rank_no + :radius
@@ -181,21 +189,29 @@ public class RankingDashboardQueryRepository {
                         rs.getLong("member_id"),
                         rs.getString("nickname"),
                         rs.getString("tier"),
-                        getLong(rs, "battle_rating")));
+                        getLong(rs, "battle_rating"),
+                        getInt(rs, "battle_match_count"),
+                        getInt(rs, "first_solved_problem_count")));
     }
 
     public List<TierSourceRow> findTierSources() {
         String sql = """
                 select
                     mrp.tier,
-                    coalesce(mrp.battle_rating, :defaultBattleRating) as battle_rating
+                    coalesce(mrp.battle_rating, :defaultBattleRating) as battle_rating,
+                    coalesce(mrp.battle_match_count, 0) as battle_match_count,
+                    coalesce(mrp.first_solved_problem_count, 0) as first_solved_problem_count
                 from members m
                 left join member_rating_profiles mrp on mrp.member_id = m.id
                 """;
         return jdbcTemplate.query(
                 sql,
                 Map.of("defaultBattleRating", DEFAULT_BATTLE_RATING),
-                (rs, rowNum) -> new TierSourceRow(rs.getString("tier"), getLong(rs, "battle_rating")));
+                (rs, rowNum) -> new TierSourceRow(
+                        rs.getString("tier"),
+                        getLong(rs, "battle_rating"),
+                        getInt(rs, "battle_match_count"),
+                        getInt(rs, "first_solved_problem_count")));
     }
 
     public List<RankingDashboardResponse.TagStat> findTagStats(Long memberId) {
@@ -277,15 +293,30 @@ public class RankingDashboardQueryRepository {
     }
 
     public record MemberRankRow(
-            Long memberId, String nickname, String tier, long score, long battleRating, long rank, long totalCount) {}
+            Long memberId,
+            String nickname,
+            String tier,
+            long score,
+            long battleRating,
+            int battleMatchCount,
+            int firstSolvedProblemCount,
+            long rank,
+            long totalCount) {}
 
     public record BattleSummary(long battleMatchCount, int top2Rate, int top2SampleSize, long scoreDeltaTotal) {}
 
     public record BattleTrendRow(LocalDateTime occurredAt, long delta) {}
 
-    public record NearbyRankingRow(long rank, Long memberId, String nickname, String tier, long battleRating) {}
+    public record NearbyRankingRow(
+            long rank,
+            Long memberId,
+            String nickname,
+            String tier,
+            long battleRating,
+            int battleMatchCount,
+            int firstSolvedProblemCount) {}
 
-    public record TierSourceRow(String tier, long battleRating) {}
+    public record TierSourceRow(String tier, long battleRating, int battleMatchCount, int firstSolvedProblemCount) {}
 
     private record RecentBattleWindowRow(Integer finalRank, long scoreDelta) {}
 }

@@ -91,7 +91,7 @@ class RankingDashboardControllerTest extends IntegrationTestBase {
                 .andExpect(jsonPath("$.profile.tier").value("SILVER_1"))
                 .andExpect(jsonPath("$.profile.rank").value(3))
                 .andExpect(jsonPath("$.profile.percentile").value(60.0))
-                .andExpect(jsonPath("$.profile.score").value(40))
+                .andExpect(jsonPath("$.profile.score").value(1580))
                 .andExpect(jsonPath("$.profile.battleRating").value(1580))
                 .andExpect(jsonPath("$.profile.nextTier").value("GOLD_5"))
                 .andExpect(jsonPath("$.profile.battleMatchCount").value(2))
@@ -107,7 +107,7 @@ class RankingDashboardControllerTest extends IntegrationTestBase {
                 .andExpect(jsonPath("$.scoreTrend[1].delta").value(-5))
                 .andExpect(jsonPath("$.gateProgress[0].key").value("SCORE"))
                 .andExpect(jsonPath("$.gateProgress[0].current").value(1580))
-                .andExpect(jsonPath("$.gateProgress[0].target").value(1600))
+                .andExpect(jsonPath("$.gateProgress[0].target").value(600))
                 .andExpect(jsonPath("$.gateProgress[1].key").value("SOLVED_1400"))
                 .andExpect(jsonPath("$.gateProgress[1].current").value(2))
                 .andExpect(jsonPath("$.gateProgress[1].target").value(12))
@@ -141,24 +141,24 @@ class RankingDashboardControllerTest extends IntegrationTestBase {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultCode").doesNotExist())
                 .andExpect(jsonPath("$.profile.memberId").value(me))
-                .andExpect(jsonPath("$.profile.tier").value("BRONZE_5"))
+                .andExpect(jsonPath("$.profile.tier").value("UNRANKED"))
                 .andExpect(jsonPath("$.profile.rank").value(1))
                 .andExpect(jsonPath("$.profile.percentile").value(100.0))
                 .andExpect(jsonPath("$.profile.score").value(0))
-                .andExpect(jsonPath("$.profile.battleRating").value(1000))
+                .andExpect(jsonPath("$.profile.battleRating").value(0))
                 .andExpect(jsonPath("$.profile.battleMatchCount").value(0))
                 .andExpect(jsonPath("$.profile.top2Rate").value(0))
                 .andExpect(jsonPath("$.profile.top2SampleSize").value(0))
                 .andExpect(jsonPath("$.scoreTrend", hasSize(1)))
                 .andExpect(jsonPath("$.scoreTrend[0].label").value("NOW"))
-                .andExpect(jsonPath("$.scoreTrend[0].score").value(1000))
+                .andExpect(jsonPath("$.scoreTrend[0].score").value(0))
                 .andExpect(jsonPath("$.scoreTrend[0].delta").value(0))
                 .andExpect(jsonPath("$.gateProgress[0].key").value("SCORE"))
-                .andExpect(jsonPath("$.gateProgress[0].current").value(1000))
-                .andExpect(jsonPath("$.gateProgress[0].target").value(1060))
+                .andExpect(jsonPath("$.gateProgress[0].current").value(0))
+                .andExpect(jsonPath("$.gateProgress[0].target").value(0))
                 .andExpect(jsonPath("$.nearbyRanking", hasSize(1)))
                 .andExpect(jsonPath("$.nearbyRanking[0].isMe").value(true))
-                .andExpect(jsonPath("$.tierDistribution[0].tier").value("BRONZE_5"))
+                .andExpect(jsonPath("$.tierDistribution[0].tier").value("UNRANKED"))
                 .andExpect(jsonPath("$.tierDistribution[0].isMyTier").value(true))
                 .andExpect(jsonPath("$.tagStats", hasSize(0)))
                 .andExpect(jsonPath("$.reviewSummary.dueTodayCount").value(0))
@@ -181,10 +181,10 @@ class RankingDashboardControllerTest extends IntegrationTestBase {
     private void insertMemberRatingProfile(Long memberId, int battleRating, String tier) {
         jdbcTemplate.update("""
                 insert into member_rating_profiles (
-                    id, member_id, battle_rating, hard_battle_rating, first_solve_score,
+                    id, member_id, battle_rating, first_solve_score,
                     tier_score, battle_match_count, first_solved_problem_count, tier, created_at
                 )
-                values (nextval('member_rating_profile_id_seq'), ?, ?, 1000, 0, ?, 0, 0, ?, now())
+                values (nextval('member_rating_profile_id_seq'), ?, ?, 0, ?, 1, 1, ?, now())
                 """, memberId, battleRating, battleRating, tier);
     }
 

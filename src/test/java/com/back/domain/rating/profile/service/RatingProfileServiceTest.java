@@ -58,6 +58,7 @@ class RatingProfileServiceTest {
 
         MemberRatingProfile winnerProfile = MemberRatingProfile.createDefault(winner);
         MemberRatingProfile loserProfile = MemberRatingProfile.createDefault(loser);
+        loserProfile.applyBattleRatingDelta(200);
 
         when(memberRatingProfileRepository.findByMemberId(1L)).thenReturn(Optional.of(winnerProfile));
         when(memberRatingProfileRepository.findByMemberId(2L)).thenReturn(Optional.of(loserProfile));
@@ -72,19 +73,20 @@ class RatingProfileServiceTest {
 
         assertThat(winnerProfile.getBattleMatchCount()).isEqualTo(1);
         assertThat(loserProfile.getBattleMatchCount()).isEqualTo(1);
-        assertThat(winnerProfile.getBattleRating()).isGreaterThan(1000);
-        assertThat(loserProfile.getBattleRating()).isLessThan(1000);
-        assertThat(winnerProfile.getHardBattleRating()).isGreaterThan(1000);
+        assertThat(winnerProfile.getBattleRating()).isGreaterThan(0);
+        assertThat(loserProfile.getBattleRating()).isLessThan(200);
     }
 
     @Test
-    @DisplayName("배치 구간(초반 20판) 패배는 하락폭을 절반으로 완화한다")
+    @DisplayName("배치 초반 구간 패배는 하락폭을 절반으로 완화한다")
     void applyBattlePlacements_reducesLossDuringPlacementMatches() {
         Member winner = Member.of(11L, "placement-winner@example.com", "placement-winner");
         Member loser = Member.of(12L, "placement-loser@example.com", "placement-loser");
 
         MemberRatingProfile winnerProfile = MemberRatingProfile.createDefault(winner);
         MemberRatingProfile loserProfile = MemberRatingProfile.createDefault(loser);
+        winnerProfile.applyBattleRatingDelta(300);
+        loserProfile.applyBattleRatingDelta(300);
 
         when(memberRatingProfileRepository.findByMemberId(11L)).thenReturn(Optional.of(winnerProfile));
         when(memberRatingProfileRepository.findByMemberId(12L)).thenReturn(Optional.of(loserProfile));
@@ -98,7 +100,69 @@ class RatingProfileServiceTest {
                 2000);
 
         // 기본 Elo 하락폭(-32)에 비해 배치 구간 완화(50%)가 적용되어 -16으로 반영된다.
-        assertThat(loserProfile.getBattleRating()).isEqualTo(984);
+        assertThat(loserProfile.getBattleRating()).isEqualTo(284);
+    }
+
+    @Test
+    @DisplayName("3등은 최소 +1 SR을 보장한다")
+    void applyBattlePlacements_thirdPlaceGetsAtLeastOnePoint() {
+        Member first = Member.of(101L, "first@example.com", "first");
+        Member second = Member.of(102L, "second@example.com", "second");
+        Member third = Member.of(103L, "third@example.com", "third");
+        Member fourth = Member.of(104L, "fourth@example.com", "fourth");
+
+        MemberRatingProfile firstProfile = MemberRatingProfile.createDefault(first);
+        MemberRatingProfile secondProfile = MemberRatingProfile.createDefault(second);
+        MemberRatingProfile thirdProfile = MemberRatingProfile.createDefault(third);
+        MemberRatingProfile fourthProfile = MemberRatingProfile.createDefault(fourth);
+        firstProfile.applyBattleRatingDelta(300);
+        secondProfile.applyBattleRatingDelta(300);
+        thirdProfile.applyBattleRatingDelta(300);
+        fourthProfile.applyBattleRatingDelta(300);
+
+        when(memberRatingProfileRepository.findByMemberId(101L)).thenReturn(Optional.of(firstProfile));
+        when(memberRatingProfileRepository.findByMemberId(102L)).thenReturn(Optional.of(secondProfile));
+        when(memberRatingProfileRepository.findByMemberId(103L)).thenReturn(Optional.of(thirdProfile));
+        when(memberRatingProfileRepository.findByMemberId(104L)).thenReturn(Optional.of(fourthProfile));
+        when(battleParticipantRepository.findRecentFinalRanksByMemberId(anyLong(), any(Pageable.class)))
+                .thenReturn(List.of(1, 2, 3, 4));
+
+        var deltas = ratingProfileService.applyBattlePlacements(
+                List.of(
+                        new RatingProfileService.BattlePlacement(first, 1, false),
+                        new RatingProfileService.BattlePlacement(second, 2, false),
+                        new RatingProfileService.BattlePlacement(third, 3, false),
+                        new RatingProfileService.BattlePlacement(fourth, 4, false)),
+                2000);
+
+        assertThat(deltas.get(103L)).isEqualTo(1);
+        assertThat(thirdProfile.getBattleRating()).isEqualTo(301);
+    }
+
+    @Test
+    @DisplayName("포기(QUIT/ABANDONED)는 Elo 결과에 추가 -10 패널티를 적용한다")
+    void applyBattlePlacements_forfeitAppliesAdditionalPenalty() {
+        Member winner = Member.of(111L, "winner-forfeit@example.com", "winner-forfeit");
+        Member quitter = Member.of(112L, "quitter@example.com", "quitter");
+
+        MemberRatingProfile winnerProfile = MemberRatingProfile.createDefault(winner);
+        MemberRatingProfile quitterProfile = MemberRatingProfile.createDefault(quitter);
+        winnerProfile.applyBattleRatingDelta(300);
+        quitterProfile.applyBattleRatingDelta(300);
+
+        when(memberRatingProfileRepository.findByMemberId(111L)).thenReturn(Optional.of(winnerProfile));
+        when(memberRatingProfileRepository.findByMemberId(112L)).thenReturn(Optional.of(quitterProfile));
+        when(battleParticipantRepository.findRecentFinalRanksByMemberId(anyLong(), any(Pageable.class)))
+                .thenReturn(List.of(1, 2));
+
+        var deltas = ratingProfileService.applyBattlePlacements(
+                List.of(
+                        new RatingProfileService.BattlePlacement(winner, 1, false),
+                        new RatingProfileService.BattlePlacement(quitter, 2, true)),
+                2000);
+
+        assertThat(deltas.get(112L)).isEqualTo(-26);
+        assertThat(quitterProfile.getBattleRating()).isEqualTo(274);
     }
 
     @Test
@@ -121,6 +185,14 @@ class RatingProfileServiceTest {
         MemberRatingProfile gold2Profile = MemberRatingProfile.createDefault(gold2);
         MemberRatingProfile gold3Profile = MemberRatingProfile.createDefault(gold3);
         MemberRatingProfile goldLoserProfile = MemberRatingProfile.createDefault(goldLoser);
+        silver1Profile.applyBattleRatingDelta(300);
+        silver2Profile.applyBattleRatingDelta(300);
+        silver3Profile.applyBattleRatingDelta(300);
+        silverLoserProfile.applyBattleRatingDelta(300);
+        gold1Profile.applyBattleRatingDelta(300);
+        gold2Profile.applyBattleRatingDelta(300);
+        gold3Profile.applyBattleRatingDelta(300);
+        goldLoserProfile.applyBattleRatingDelta(300);
         goldLoserProfile.updateTier(RatingTier.GOLD_5);
 
         when(memberRatingProfileRepository.findByMemberId(21L)).thenReturn(Optional.of(silver1Profile));
@@ -150,21 +222,20 @@ class RatingProfileServiceTest {
                 2000);
 
         // 브론즈/실버는 3연패 이상에서 하락폭이 -12 바닥으로 보호된다.
-        assertThat(silverLoserProfile.getBattleRating()).isEqualTo(988);
+        assertThat(silverLoserProfile.getBattleRating()).isEqualTo(288);
         // 골드 이상은 같은 조건에서도 보호 로직이 적용되지 않는다.
-        assertThat(goldLoserProfile.getBattleRating()).isEqualTo(984);
+        assertThat(goldLoserProfile.getBattleRating()).isEqualTo(284);
     }
 
     @Test
-    @DisplayName("SR은 최소 900 바닥을 유지해 추가 하락을 막는다")
+    @DisplayName("SR은 최소 0 바닥을 유지해 추가 하락을 막는다")
     void applyBattlePlacements_appliesSkillRatingFloor() {
         Member winner = Member.of(41L, "floor-winner@example.com", "floor-winner");
         Member floorMember = Member.of(42L, "floor-member@example.com", "floor-member");
 
         MemberRatingProfile winnerProfile = MemberRatingProfile.createDefault(winner);
         MemberRatingProfile floorProfile = MemberRatingProfile.createDefault(floorMember);
-        floorProfile.applyBattleRatingDelta(-100);
-        floorProfile.applyHardBattleRatingDelta(-100);
+        floorProfile.applyBattleRatingDelta(5);
         floorProfile.updateTier(RatingTier.GOLD_5);
         for (int i = 0; i < 30; i++) {
             floorProfile.increaseBattleMatchCount();
@@ -181,8 +252,7 @@ class RatingProfileServiceTest {
                         new RatingProfileService.BattlePlacement(floorMember, 2)),
                 2200);
 
-        assertThat(floorProfile.getBattleRating()).isEqualTo(900);
-        assertThat(floorProfile.getHardBattleRating()).isEqualTo(900);
+        assertThat(floorProfile.getBattleRating()).isEqualTo(0);
     }
 
     @Test
@@ -208,7 +278,7 @@ class RatingProfileServiceTest {
         assertThat(applied).isTrue();
         assertThat(profile.getFirstSolveScore()).isEqualTo(15);
         assertThat(profile.getFirstSolvedProblemCount()).isEqualTo(1);
-        assertThat(profile.getTierScore()).isEqualTo(1000);
+        assertThat(profile.getTierScore()).isEqualTo(0);
         assertThat(profile.getTier().name()).isEqualTo("BRONZE_5");
     }
 
@@ -235,7 +305,7 @@ class RatingProfileServiceTest {
         assertThat(applied).isTrue();
         assertThat(profile.getFirstSolveScore()).isEqualTo(14);
         assertThat(profile.getFirstSolvedProblemCount()).isEqualTo(1);
-        assertThat(profile.getTierScore()).isEqualTo(1000);
+        assertThat(profile.getTierScore()).isEqualTo(0);
     }
 
     @Test

@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -43,10 +44,6 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 @RequiredArgsConstructor
 public class BattleResultService {
-
-    // 점수 정책 완화: 1등 +20, 2등 +8, 3등 +2, 4등 -5
-    private static final long[] SCORE_TABLE = {20L, 8L, 2L};
-    private static final long LAST_PLACE_PENALTY = -5L;
 
     // 오답 패널티: WA 1회당 20초
     private static final long WA_PENALTY_SECONDS = 20L;
@@ -95,39 +92,36 @@ public class BattleResultService {
 
         List<RatingProfileService.BattlePlacement> placements = new ArrayList<>(sorted.size());
         List<BattleParticipant> acParticipants = new ArrayList<>();
+        Map<Long, Integer> rankByMemberId = new HashMap<>(sorted.size());
 
-        // 4. 등수 & 점수 부여
+        // 4. 등수 부여 + Elo 정산 입력 구성
         int rank = 1;
-        int totalParticipants = sorted.size();
         for (BattleParticipant participant : sorted) {
             boolean isAC = participant.getStatus() == BattleParticipantStatus.SOLVED;
             boolean isDisconnected = participant.getStatus() == BattleParticipantStatus.ABANDONED
                     || participant.getStatus() == BattleParticipantStatus.QUIT;
-            long scoreDelta = 0L;
-            if (isAC && rank <= SCORE_TABLE.length) {
-                scoreDelta = SCORE_TABLE[rank - 1];
-            }
-            if (isDisconnected) {
-                scoreDelta = LAST_PLACE_PENALTY;
-            } else if (totalParticipants >= 4 && rank == totalParticipants) {
-                scoreDelta = LAST_PLACE_PENALTY;
-            }
+            rankByMemberId.put(participant.getMember().getId(), rank);
 
-            participant.applyResult(rank, scoreDelta);
-
-            // 5. Member.score 갱신
-            participant.getMember().applyScore(scoreDelta);
             if (isAC) {
                 acParticipants.add(participant);
             }
-            // Elo 정산은 participant 전체 순위가 필요하므로 별도 리스트로 누적한다.
-            placements.add(new RatingProfileService.BattlePlacement(participant.getMember(), rank));
+            placements.add(new RatingProfileService.BattlePlacement(participant.getMember(), rank, isDisconnected));
 
             rank++;
         }
 
-        // 배틀 SR 정산(Elo 기반 + 양학 감쇠 + 언더독 보너스).
-        ratingProfileService.applyBattlePlacements(placements, room.getProblem().getDifficultyRating());
+        // 배틀 SR 정산(Elo 기반 + 양학 감쇠 + 언더독 보너스 + 포기 패널티).
+        Map<Long, Integer> deltaByMemberId = ratingProfileService.applyBattlePlacements(
+                placements, room.getProblem().getDifficultyRating());
+        if (deltaByMemberId == null) {
+            deltaByMemberId = Map.of();
+        }
+        for (BattleParticipant participant : sorted) {
+            int finalRank = rankByMemberId.getOrDefault(participant.getMember().getId(), 0);
+            int scoreDelta =
+                    deltaByMemberId.getOrDefault(participant.getMember().getId(), 0);
+            participant.applyResult(finalRank, scoreDelta);
+        }
 
         for (BattleParticipant participant : acParticipants) {
             // 배틀에서 처음으로 푼 문제라면 난이도 기반 first-AC 보너스를 1회 반영한다.

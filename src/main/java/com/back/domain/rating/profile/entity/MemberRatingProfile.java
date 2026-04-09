@@ -43,10 +43,6 @@ public class MemberRatingProfile extends BaseEntity {
     @Column(name = "battle_rating")
     private Integer battleRating;
 
-    // 하드 배틀(난이도 2000+) 전용 실력 지표(Hard SR)
-    @Column(name = "hard_battle_rating")
-    private Integer hardBattleRating;
-
     // 활동 점수(AP): 문제별 first-AC 난이도 누적 지표(솔로/배틀 공통)
     @Column(name = "first_solve_score")
     private Integer firstSolveScore;
@@ -70,10 +66,9 @@ public class MemberRatingProfile extends BaseEntity {
     public static MemberRatingProfile createDefault(Member member) {
         MemberRatingProfile ranking = new MemberRatingProfile();
         ranking.member = member;
-        ranking.battleRating = 1000;
-        ranking.hardBattleRating = 1000;
+        ranking.battleRating = 0;
         ranking.firstSolveScore = 0;
-        ranking.tierScore = 1000;
+        ranking.tierScore = 0;
         ranking.battleMatchCount = 0;
         ranking.firstSolvedProblemCount = 0;
         ranking.tier = RatingTier.BRONZE_5;
@@ -82,12 +77,7 @@ public class MemberRatingProfile extends BaseEntity {
 
     // null 안전 누적으로 SR 증감을 반영한다.
     public void applyBattleRatingDelta(int delta) {
-        this.battleRating = (this.battleRating == null ? 1000 : this.battleRating) + delta;
-    }
-
-    // null 안전 누적으로 Hard SR 증감을 반영한다.
-    public void applyHardBattleRatingDelta(int delta) {
-        this.hardBattleRating = (this.hardBattleRating == null ? 1000 : this.hardBattleRating) + delta;
+        this.battleRating = (this.battleRating == null ? 0 : this.battleRating) + delta;
     }
 
     // null 안전 누적으로 문제별 first-AC 난이도 점수를 반영한다.
