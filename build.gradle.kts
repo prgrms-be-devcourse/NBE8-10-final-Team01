@@ -3,6 +3,46 @@ plugins {
     id("org.springframework.boot") version "3.5.11"
     id("io.spring.dependency-management") version "1.1.7"
     id("com.diffplug.spotless") version "8.1.0"
+    jacoco
+}
+
+jacoco {
+    // Jacoco 버전 (2026년 기준 최신 안정화 버전 권장)
+    toolVersion = "0.8.12"
+}
+
+tasks.jacocoTestReport {
+    // 2. 리포트 생성 전 테스트가 반드시 실행되도록 설정
+    dependsOn(tasks.test)
+
+    reports {
+        // html 리포트 활성화 (브라우저로 볼 용도)
+        html.required.set(true)
+        // xml 리포트 활성화 (SonarQube 등 연동용)
+        xml.required.set(true)
+
+        // 리포트 저장 위치를 바꾸고 싶다면 (기본값은 build/reports/jacoco)
+        // html.outputLocation.set(layout.buildDirectory.dir("jacocoHtml"))
+    }
+
+    // 3. 리포트에서 제외할 클래스 설정 (QueryDSL, DTO 등)
+    classDirectories.setFrom(
+        files(classDirectories.files.map {
+            fileTree(it) {
+                exclude(
+                    "**/dto/**",
+                    "**/config/**",
+                    "**/*Application*",
+                    "**/Q*" // QueryDSL용
+                )
+            }
+        })
+    )
+}
+
+tasks.test {
+    // 4. 테스트 완료 후 자동으로 Jacoco 리포트 생성
+    finalizedBy(tasks.jacocoTestReport)
 }
 
 group = "com"
@@ -88,6 +128,8 @@ dependencies {
     testImplementation("org.testcontainers:junit-jupiter")
     testImplementation("org.testcontainers:testcontainers")
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
+
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.5.0")
 }
 
 tasks.withType<Test> {
