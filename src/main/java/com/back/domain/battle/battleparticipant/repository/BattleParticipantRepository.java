@@ -1,5 +1,6 @@
 package com.back.domain.battle.battleparticipant.repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -142,4 +143,17 @@ public interface BattleParticipantRepository extends JpaRepository<BattlePartici
             """)
     // 최근 Top2 비율 산정용: 최신 순으로 finalRank만 가볍게 조회한다.
     List<Integer> findRecentFinalRanksByMemberId(@Param("memberId") Long memberId, Pageable pageable);
+
+    // 잔디 히트맵용: 같은 문제를 여러 방에서 풀어도 최초 solve 시각 1건만 집계한다.
+    @Query("""
+            select min(bp.finishTime)
+            from BattleParticipant bp
+            join bp.battleRoom br
+            where bp.member.id = :memberId
+              and bp.status = :status
+              and br.problem is not null
+            group by br.problem.id
+            """)
+    List<LocalDateTime> findFirstSolvedAtByMemberIdAndStatus(
+            @Param("memberId") Long memberId, @Param("status") BattleParticipantStatus status);
 }
