@@ -46,10 +46,11 @@ jobs:
               return parseFloat(((covered / total) * 100).toFixed(1));
             };
 
-            // Overall 커버리지: <report> 바로 아래 <counter> 태그에서 추출
-            const reportCounters = [...xml.matchAll(/<\/package>\s*([\s\S]*?)<\/report>/g)][0]?.[1] || '';
-            const overallLine = reportCounters.match(/<counter type="LINE" missed="(\d+)" covered="(\d+)"/);
-            const overallBranch = reportCounters.match(/<counter type="BRANCH" missed="(\d+)" covered="(\d+)"/);
+            // Overall 커버리지: 마지막 </package> 이후의 <counter> 태그에서 추출
+            const lastPackageEnd = xml.lastIndexOf('</package>');
+            const reportTail = lastPackageEnd >= 0 ? xml.slice(lastPackageEnd + '</package>'.length) : xml;
+            const overallLine = reportTail.match(/<counter type="LINE" missed="(\d+)" covered="(\d+)"/);
+            const overallBranch = reportTail.match(/<counter type="BRANCH" missed="(\d+)" covered="(\d+)"/);
             const overallLinePct = overallLine ? pct(parseInt(overallLine[2]), parseInt(overallLine[1])) : -1;
             const overallBranchPct = overallBranch ? pct(parseInt(overallBranch[2]), parseInt(overallBranch[1])) : -1;
             const overallEmoji = overallLinePct >= 80 ? '🟢' : overallLinePct >= 50 ? '🟡' : '🔴';
