@@ -42,6 +42,81 @@ jobs:
           min-coverage-overall: 0
           min-coverage-changed-files: 0
 
+      - name: JaCoCo 패키지별 상세 커버리지 코멘트
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const xml = fs.readFileSync('build/reports/jacoco/test/jacocoTestReport.xml', 'utf8');
+
+            const packageMatches = [...xml.matchAll(/<package name="([^"]+)"[\s\S]*?<\/package>/g)];
+
+            const rows = packageMatches.map(match => {
+              const pkgRaw = match[1];
+              // com/example/service/user 같은 경로에서 마지막 두 단계만 표시
+              const parts = pkgRaw.split('/');
+              const pkg = parts.slice(-2).join('/');
+
+              const counters = [...match[0].matchAll(/<counter type="([^"]+)" missed="(\d+)" covered="(\d+)"/g)];
+              const lineCounter = counters.find(c => c[1] === 'LINE');
+              const branchCounter = counters.find(c => c[1] === 'BRANCH');
+
+              const pct = (covered, missed) => {
+                const total = covered + missed;
+                if (total === 0) return 'N/A';
+                return ((covered / total) * 100).toFixed(1) + '%';
+              };
+
+              const linePct = lineCounter
+                ? pct(parseInt(lineCounter[3]), parseInt(lineCounter[2]))
+                : 'N/A';
+              const branchPct = branchCounter
+                ? pct(parseInt(branchCounter[3]), parseInt(branchCounter[2]))
+                : 'N/A';
+
+              const emoji = parseFloat(linePct) >= 80 ? '🟢' : parseFloat(linePct) >= 50 ? '🟡' : '🔴';
+
+              return `| ${emoji} \`${pkg}\` | ${linePct} | ${branchPct} |`;
+            });
+
+            const body = [
+              '## 📦 패키지별 테스트 커버리지',
+              '',
+              '| 패키지 | Line | Branch |',
+              '|--------|------|--------|',
+              ...rows,
+              '',
+              '> 🟢 80% 이상 &nbsp; 🟡 50~79% &nbsp; 🔴 50% 미만',
+            ].join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existing = comments.find(c =>
+              c.user.login === 'github-actions[bot]' &&
+              c.body.includes('패키지별 테스트 커버리지')
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
       - name: Discord 알림 (CI 실패)
         if: failure()
         run: |
