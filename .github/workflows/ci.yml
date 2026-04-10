@@ -33,16 +33,6 @@ jobs:
         run: ./gradlew build
 
       - name: JaCoCo 커버리지 PR 코멘트
-        uses: madrapps/jacoco-report@v1.7.1
-        with:
-          paths: ${{ github.workspace }}/build/reports/jacoco/test/jacocoTestReport.xml
-          token: ${{ secrets.GITHUB_TOKEN }}
-          title: "테스트 커버리지 리포트"
-          update-comment: true
-          min-coverage-overall: 0
-          min-coverage-changed-files: 0
-
-      - name: JaCoCo 패키지별 상세 커버리지 코멘트
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -50,40 +40,48 @@ jobs:
             const fs = require('fs');
             const xml = fs.readFileSync('build/reports/jacoco/test/jacocoTestReport.xml', 'utf8');
 
-            const packageMatches = [...xml.matchAll(/<package name="([^"]+)"[\s\S]*?<\/package>/g)];
-
             const pct = (covered, missed) => {
               const total = covered + missed;
               if (total === 0) return -1;
               return parseFloat(((covered / total) * 100).toFixed(1));
             };
 
-            const packages = packageMatches.map(match => {
-              const pkgRaw = match[1];
-              const parts = pkgRaw.split('/');
-              const pkg = parts.slice(-2).join('/');
+            // Overall 커버리지: <report> 바로 아래 <counter> 태그에서 추출
+            const reportCounters = [...xml.matchAll(/<\/package>\s*([\s\S]*?)<\/report>/g)][0]?.[1] || '';
+            const overallLine = reportCounters.match(/<counter type="LINE" missed="(\d+)" covered="(\d+)"/);
+            const overallBranch = reportCounters.match(/<counter type="BRANCH" missed="(\d+)" covered="(\d+)"/);
+            const overallLinePct = overallLine ? pct(parseInt(overallLine[2]), parseInt(overallLine[1])) : -1;
+            const overallBranchPct = overallBranch ? pct(parseInt(overallBranch[2]), parseInt(overallBranch[1])) : -1;
+            const overallEmoji = overallLinePct >= 80 ? '🟢' : overallLinePct >= 50 ? '🟡' : '🔴';
 
+            // 패키지별 커버리지
+            const packageMatches = [...xml.matchAll(/<package name="([^"]+)"[\s\S]*?<\/package>/g)];
+            const packages = packageMatches.map(match => {
+              const parts = match[1].split('/');
+              const pkg = parts.slice(-2).join('/');
               const counters = [...match[0].matchAll(/<counter type="([^"]+)" missed="(\d+)" covered="(\d+)"/g)];
               const lineCounter = counters.find(c => c[1] === 'LINE');
               const branchCounter = counters.find(c => c[1] === 'BRANCH');
-
               const linePct = lineCounter ? pct(parseInt(lineCounter[3]), parseInt(lineCounter[2])) : -1;
               const branchPct = branchCounter ? pct(parseInt(branchCounter[3]), parseInt(branchCounter[2])) : -1;
-
               return { pkg, linePct, branchPct };
             });
 
             packages.sort((a, b) => b.linePct - a.linePct);
 
             const rows = packages.map(({ pkg, linePct, branchPct }) => {
-              const lineStr = linePct < 0 ? 'N/A' : linePct + '%';
-              const branchStr = branchPct < 0 ? 'N/A' : branchPct + '%';
               const emoji = linePct >= 80 ? '🟢' : linePct >= 50 ? '🟡' : '🔴';
-              return `| ${emoji} \`${pkg}\` | ${lineStr} | ${branchStr} |`;
+              return `| ${emoji} \`${pkg}\` | ${linePct < 0 ? 'N/A' : linePct + '%'} | ${branchPct < 0 ? 'N/A' : branchPct + '%'} |`;
             });
 
             const body = [
-              '## 📦 패키지별 테스트 커버리지',
+              '## 📊 테스트 커버리지 리포트',
+              '',
+              `### Overall: ${overallEmoji} Line \`${overallLinePct < 0 ? 'N/A' : overallLinePct + '%'}\` | Branch \`${overallBranchPct < 0 ? 'N/A' : overallBranchPct + '%'}\``,
+              '',
+              '---',
+              '',
+              '### 📦 패키지별 커버리지',
               '',
               '| 패키지 | Line | Branch |',
               '|--------|------|--------|',
@@ -100,7 +98,7 @@ jobs:
 
             const existing = comments.find(c =>
               c.user.login === 'github-actions[bot]' &&
-              c.body.includes('패키지별 테스트 커버리지')
+              c.body.includes('테스트 커버리지 리포트')
             );
 
             if (existing) {
