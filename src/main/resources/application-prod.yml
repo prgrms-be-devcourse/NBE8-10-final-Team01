@@ -36,7 +36,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health, prometheus
+        include: health, info, metrics, prometheus
   endpoint:
     health:
       show-details: never
@@ -49,6 +49,15 @@ management:
       application: ${spring.application.name}
     distribution:
       # p95/p99 쿼리를 위해 HTTP 서버 요청 히스토그램을 활성화한다.
+      percentiles:
+        http:
+          server:
+            requests: 0.5, 0.9, 0.95, 0.99
+      # SLO 구간을 고정해 시계열 변동 없이 패널을 구성할 수 있게 한다.
+      slo:
+        http:
+          server:
+            requests: 50ms, 100ms, 200ms, 500ms, 1s, 2s
       percentiles-histogram:
         http:
           server:

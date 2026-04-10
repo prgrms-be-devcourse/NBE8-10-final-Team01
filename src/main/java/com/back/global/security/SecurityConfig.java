@@ -50,6 +50,9 @@ public class SecurityConfig {
                                 // (쿠키 기반 Principal 전파 또는 X-WS-Token 1회용 토큰 검증)
                                 "/ws/**",
                                 "/actuator/health",
+                                "/actuator/info",
+                                "/actuator/metrics",
+                                "/actuator/metrics/**",
                                 "/actuator/prometheus",
                                 "/error")
                         .permitAll()
