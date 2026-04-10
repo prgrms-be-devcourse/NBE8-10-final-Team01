@@ -52,9 +52,14 @@ jobs:
 
             const packageMatches = [...xml.matchAll(/<package name="([^"]+)"[\s\S]*?<\/package>/g)];
 
-            const rows = packageMatches.map(match => {
+            const pct = (covered, missed) => {
+              const total = covered + missed;
+              if (total === 0) return -1;
+              return parseFloat(((covered / total) * 100).toFixed(1));
+            };
+
+            const packages = packageMatches.map(match => {
               const pkgRaw = match[1];
-              // com/example/service/user 같은 경로에서 마지막 두 단계만 표시
               const parts = pkgRaw.split('/');
               const pkg = parts.slice(-2).join('/');
 
@@ -62,22 +67,19 @@ jobs:
               const lineCounter = counters.find(c => c[1] === 'LINE');
               const branchCounter = counters.find(c => c[1] === 'BRANCH');
 
-              const pct = (covered, missed) => {
-                const total = covered + missed;
-                if (total === 0) return 'N/A';
-                return ((covered / total) * 100).toFixed(1) + '%';
-              };
+              const linePct = lineCounter ? pct(parseInt(lineCounter[3]), parseInt(lineCounter[2])) : -1;
+              const branchPct = branchCounter ? pct(parseInt(branchCounter[3]), parseInt(branchCounter[2])) : -1;
 
-              const linePct = lineCounter
-                ? pct(parseInt(lineCounter[3]), parseInt(lineCounter[2]))
-                : 'N/A';
-              const branchPct = branchCounter
-                ? pct(parseInt(branchCounter[3]), parseInt(branchCounter[2]))
-                : 'N/A';
+              return { pkg, linePct, branchPct };
+            });
 
-              const emoji = parseFloat(linePct) >= 80 ? '🟢' : parseFloat(linePct) >= 50 ? '🟡' : '🔴';
+            packages.sort((a, b) => b.linePct - a.linePct);
 
-              return `| ${emoji} \`${pkg}\` | ${linePct} | ${branchPct} |`;
+            const rows = packages.map(({ pkg, linePct, branchPct }) => {
+              const lineStr = linePct < 0 ? 'N/A' : linePct + '%';
+              const branchStr = branchPct < 0 ? 'N/A' : branchPct + '%';
+              const emoji = linePct >= 80 ? '🟢' : linePct >= 50 ? '🟡' : '🔴';
+              return `| ${emoji} \`${pkg}\` | ${lineStr} | ${branchStr} |`;
             });
 
             const body = [
