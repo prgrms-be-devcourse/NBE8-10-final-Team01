@@ -23,6 +23,28 @@ spring:
 judge0:
   url: http://${JUDGE0_EC2_IP}:2358
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, prometheus
+  endpoint:
+    health:
+      show-details: never
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      # p95/p99 쿼리를 위해 HTTP 서버 요청 히스토그램을 활성화한다.
+      percentiles-histogram:
+        http:
+          server:
+            requests: true
+
 matching:
   store:
     type: redis
