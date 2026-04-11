@@ -32,8 +32,8 @@ class GracePeriodConsumerTest {
     private static final Long ROOM_ID = 1L;
 
     @Test
-    @DisplayName("grace period 만료 시 참여자가 ABANDONED이면 PARTICIPANT_LEFT를 브로드캐스트한다")
-    void handle_ABANDONED참여자_PARTICIPANT_LEFT발행() {
+    @DisplayName("grace period 만료 시 참여자가 ABANDONED이면 PARTICIPANT_STATUS_CHANGED(ABANDONED)를 브로드캐스트한다")
+    void handle_ABANDONED참여자_PARTICIPANT_STATUS_CHANGED발행() {
         BattleRoom room = mock(BattleRoom.class);
         when(room.getId()).thenReturn(ROOM_ID);
 
@@ -50,7 +50,7 @@ class GracePeriodConsumerTest {
     }
 
     @Test
-    @DisplayName("grace period 만료 시 참여자가 이미 재접속했으면 PARTICIPANT_LEFT를 발행하지 않는다")
+    @DisplayName("grace period 만료 시 참여자가 이미 재접속했으면 publish하지 않는다")
     void handle_이미재접속한참여자_발행안함() {
         when(battleParticipantRepository.findAbandonedParticipantByMemberId(
                         MEMBER_ID, BattleParticipantStatus.ABANDONED, BattleRoomStatus.PLAYING))
@@ -62,7 +62,7 @@ class GracePeriodConsumerTest {
     }
 
     @Test
-    @DisplayName("PARTICIPANT_LEFT 발행 시 올바른 roomId와 타입이 포함된다")
+    @DisplayName("PARTICIPANT_STATUS_CHANGED(ABANDONED) 발행 시 올바른 roomId, 타입, 상태가 포함된다")
     void handle_발행메시지에_올바른roomId포함() {
         BattleRoom room = mock(BattleRoom.class);
         when(room.getId()).thenReturn(ROOM_ID);
@@ -79,6 +79,9 @@ class GracePeriodConsumerTest {
         verify(publisher)
                 .publish(
                         eq("/topic/room/" + ROOM_ID),
-                        eq(java.util.Map.of("type", "PARTICIPANT_LEFT", "userId", MEMBER_ID)));
+                        eq(java.util.Map.of(
+                                "type", "PARTICIPANT_STATUS_CHANGED",
+                                "userId", MEMBER_ID,
+                                "status", "ABANDONED")));
     }
 }

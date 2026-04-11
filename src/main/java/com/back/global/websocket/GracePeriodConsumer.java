@@ -19,18 +19,18 @@ import lombok.extern.slf4j.Slf4j;
  * Grace Period 만료 메시지를 소비하는 백그라운드 컨슈머.
  *
  * Redisson DelayedQueue에 등록된 메시지가 15초 후 BlockingQueue로 이동하면
- * 이 컨슈머가 꺼내서 PARTICIPANT_LEFT 브로드캐스트 여부를 결정한다.
+ * 이 컨슈머가 꺼내서 PARTICIPANT_STATUS_CHANGED(ABANDONED) 브로드캐스트 여부를 결정한다.
  *
  * 처리 흐름:
  * blockingQueue.take() → memberId 수신
  *   → DB 조회: 아직 ABANDONED 상태인지 확인
- *   → ABANDONED → PARTICIPANT_LEFT 브로드캐스트
+ *   → ABANDONED → PARTICIPANT_STATUS_CHANGED(ABANDONED) 브로드캐스트
  *   → PLAYING   → 이미 재접속함, 스킵
  *
  *
  * DB 조회를 거치는 이유:
  * cancelGracePeriod()가 타이밍 상 blockingQueue에서 항목을 제거하지 못한 경우에도
- * 이미 재접속한 참여자에게 PARTICIPANT_LEFT가 잘못 발행되는 것을 방지한다.
+ * 이미 재접속한 참여자에게 PARTICIPANT_STATUS_CHANGED(ABANDONED)가 잘못 발행되는 것을 방지한다.
  */
 @Slf4j
 @Component
@@ -73,9 +73,19 @@ public class GracePeriodConsumer {
                 .ifPresentOrElse(
                         p -> {
                             Long roomId = p.getBattleRoom().getId();
-                            log.info("grace period 만료 - PARTICIPANT_LEFT 전송 memberId={}, roomId={}", memberId, roomId);
+                            log.info(
+                                    "grace period 만료 - PARTICIPANT_STATUS_CHANGED(ABANDONED) 전송 memberId={}, roomId={}",
+                                    memberId,
+                                    roomId);
                             publisher.publish(
-                                    "/topic/room/" + roomId, Map.of("type", "PARTICIPANT_LEFT", "userId", memberId));
+                                    "/topic/room/" + roomId,
+                                    Map.of(
+                                            "type",
+                                            "PARTICIPANT_STATUS_CHANGED",
+                                            "userId",
+                                            memberId,
+                                            "status",
+                                            "ABANDONED"));
                         },
                         () -> log.debug("grace period 만료 - 이미 재접속함, 스킵 memberId={}", memberId));
     }

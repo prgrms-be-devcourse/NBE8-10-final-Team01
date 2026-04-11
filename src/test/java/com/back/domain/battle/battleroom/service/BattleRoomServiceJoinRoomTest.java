@@ -89,8 +89,8 @@ class BattleRoomServiceJoinRoomTest {
     }
 
     @Test
-    @DisplayName("ABANDONED 참여자가 재입장하면 grace period를 취소하고 PLAYING 상태 이벤트를 발행한다")
-    void joinRoom_abandonedParticipant_cancelsGracePeriodAndBroadcastsPlayingStatus() {
+    @DisplayName("ABANDONED 참여자가 재입장하면 grace를 취소하고 PLAYING 이벤트를 발행한다")
+    void joinRoom_abandonedParticipant_cancelsGraceAndBroadcastsPlayingStatus() {
         BattleRoom room = playingRoom();
         Member member = member();
         BattleParticipant participant = BattleParticipant.create(room, member);
@@ -102,8 +102,8 @@ class BattleRoomServiceJoinRoomTest {
 
         withAfterCommit(() -> sut.joinRoom(ROOM_ID, MEMBER_ID));
 
-        verify(reconnectStore).cancelGracePeriod(MEMBER_ID);
         assertThat(participant.getStatus()).isEqualTo(BattleParticipantStatus.PLAYING);
+        verify(reconnectStore).cancelGracePeriod(MEMBER_ID);
         verify(publisher)
                 .publish(
                         eq("/topic/room/" + ROOM_ID),

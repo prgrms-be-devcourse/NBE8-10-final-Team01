@@ -8,7 +8,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.Collections;
-import java.util.Map;
 import java.util.Optional;
 
 import org.junit.jupiter.api.DisplayName;
@@ -34,7 +33,7 @@ class BattleDisconnectHandlerTest {
     private final WebSocketMessagePublisher publisher = mock(WebSocketMessagePublisher.class);
 
     private final BattleDisconnectHandler sut =
-            new BattleDisconnectHandler(battleParticipantRepository, reconnectStore, publisher);
+            new BattleDisconnectHandler(battleParticipantRepository, reconnectStore);
 
     private static final Long MEMBER_ID = 10L;
     private static final Long ROOM_ID = 1L;
@@ -57,20 +56,11 @@ class BattleDisconnectHandlerTest {
 
         withAfterCommit(() -> sut.handleDisconnect(event));
 
-        com.back.domain.battle.battleparticipant.entity.BattleParticipantStatus status = participant.getStatus();
-        org.assertj.core.api.Assertions.assertThat(status).isEqualTo(BattleParticipantStatus.ABANDONED);
-        verify(reconnectStore).startGracePeriod(MEMBER_ID);
+        org.assertj.core.api.Assertions.assertThat(participant.getStatus())
+                .isEqualTo(BattleParticipantStatus.ABANDONED);
         verify(battleParticipantRepository).save(participant);
-        verify(publisher)
-                .publish(
-                        "/topic/room/" + ROOM_ID,
-                        Map.of(
-                                "type",
-                                "PARTICIPANT_STATUS_CHANGED",
-                                "userId",
-                                MEMBER_ID,
-                                "status",
-                                BattleParticipantStatus.ABANDONED.name()));
+        verify(reconnectStore).startGracePeriod(MEMBER_ID);
+        verify(publisher, never()).publish(any(), any());
     }
 
     @Test

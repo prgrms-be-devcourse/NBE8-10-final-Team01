@@ -100,14 +100,15 @@ public class BattleRoomService {
                 .findByBattleRoomAndMember(room, member)
                 .orElseThrow(() -> new IllegalArgumentException("해당 방의 참여자가 아닙니다."));
 
-        if (participant.getStatus() == BattleParticipantStatus.READY
-                || participant.getStatus() == BattleParticipantStatus.ABANDONED) {
-            if (participant.getStatus() == BattleParticipantStatus.ABANDONED) {
+        boolean wasAbandoned = participant.getStatus() == BattleParticipantStatus.ABANDONED;
+
+        if (participant.getStatus() == BattleParticipantStatus.READY || wasAbandoned) {
+            if (wasAbandoned) {
                 reconnectStore.cancelGracePeriod(memberId);
             }
+            publishPlaying = true;
             participant.join();
             battleParticipantRepository.save(participant);
-            publishPlaying = true;
         } else {
             throw new IllegalStateException("입장할 수 없는 참여자 상태입니다. 현재 상태: " + participant.getStatus());
         }
