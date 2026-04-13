@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   build-and-test:
@@ -30,6 +31,92 @@ jobs:
 
       - name: Build and Test
         run: ./gradlew build
+
+      - name: JaCoCo 커버리지 PR 코멘트
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const xml = fs.readFileSync('build/reports/jacoco/test/jacocoTestReport.xml', 'utf8');
+
+            const pct = (covered, missed) => {
+              const total = covered + missed;
+              if (total === 0) return -1;
+              return parseFloat(((covered / total) * 100).toFixed(1));
+            };
+
+            // Overall 커버리지: 마지막 </package> 이후의 <counter> 태그에서 추출
+            const lastPackageEnd = xml.lastIndexOf('</package>');
+            const reportTail = lastPackageEnd >= 0 ? xml.slice(lastPackageEnd + '</package>'.length) : xml;
+            const overallLine = reportTail.match(/<counter type="LINE" missed="(\d+)" covered="(\d+)"/);
+            const overallBranch = reportTail.match(/<counter type="BRANCH" missed="(\d+)" covered="(\d+)"/);
+            const overallLinePct = overallLine ? pct(parseInt(overallLine[2]), parseInt(overallLine[1])) : -1;
+            const overallBranchPct = overallBranch ? pct(parseInt(overallBranch[2]), parseInt(overallBranch[1])) : -1;
+            const overallEmoji = overallLinePct >= 80 ? '🟢' : overallLinePct >= 50 ? '🟡' : '🔴';
+
+            // 패키지별 커버리지
+            const packageMatches = [...xml.matchAll(/<package name="([^"]+)"[\s\S]*?<\/package>/g)];
+            const packages = packageMatches.map(match => {
+              const parts = match[1].split('/');
+              const pkg = parts.slice(-2).join('/');
+              const counters = [...match[0].matchAll(/<counter type="([^"]+)" missed="(\d+)" covered="(\d+)"/g)];
+              const lineCounter = counters.find(c => c[1] === 'LINE');
+              const branchCounter = counters.find(c => c[1] === 'BRANCH');
+              const linePct = lineCounter ? pct(parseInt(lineCounter[3]), parseInt(lineCounter[2])) : -1;
+              const branchPct = branchCounter ? pct(parseInt(branchCounter[3]), parseInt(branchCounter[2])) : -1;
+              return { pkg, linePct, branchPct };
+            });
+
+            packages.sort((a, b) => b.linePct - a.linePct);
+
+            const rows = packages.map(({ pkg, linePct, branchPct }) => {
+              const emoji = linePct >= 80 ? '🟢' : linePct >= 50 ? '🟡' : '🔴';
+              return `| ${emoji} \`${pkg}\` | ${linePct < 0 ? 'N/A' : linePct + '%'} | ${branchPct < 0 ? 'N/A' : branchPct + '%'} |`;
+            });
+
+            const body = [
+              '## 📊 테스트 커버리지 리포트',
+              '',
+              `### Overall: ${overallEmoji} Line \`${overallLinePct < 0 ? 'N/A' : overallLinePct + '%'}\` | Branch \`${overallBranchPct < 0 ? 'N/A' : overallBranchPct + '%'}\``,
+              '',
+              '---',
+              '',
+              '### 📦 패키지별 커버리지',
+              '',
+              '| 패키지 | Line | Branch |',
+              '|--------|------|--------|',
+              ...rows,
+              '',
+              '> 🟢 80% 이상 &nbsp; 🟡 50~79% &nbsp; 🔴 50% 미만',
+            ].join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existing = comments.find(c =>
+              c.user.login === 'github-actions[bot]' &&
+              c.body.includes('테스트 커버리지 리포트')
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
 
       - name: Discord 알림 (CI 실패)
         if: failure()
