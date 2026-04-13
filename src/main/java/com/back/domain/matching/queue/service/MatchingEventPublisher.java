@@ -1,6 +1,5 @@
 package com.back.domain.matching.queue.service;
 
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
 import com.back.domain.matching.queue.dto.MatchStateV2Response;
@@ -8,6 +7,7 @@ import com.back.domain.matching.queue.dto.MatchingEventResponse;
 import com.back.domain.matching.queue.dto.MatchingEventType;
 import com.back.domain.matching.queue.dto.QueueStateV2Response;
 import com.back.domain.matching.queue.model.QueueKey;
+import com.back.global.websocket.pubsub.WebSocketMessagePublisher;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,7 +20,7 @@ public class MatchingEventPublisher {
     private static final int REQUIRED_MATCH_SIZE = 4;
     private static final String USER_MATCHING_DESTINATION = "/queue/matching";
 
-    private final SimpMessagingTemplate messagingTemplate;
+    private final WebSocketMessagePublisher webSocketMessagePublisher;
 
     public void publishQueueStateChanged(QueueKey queueKey, int waitingCount) {
         // queue topic 은 "같은 queueKey 대기자 공용" 채널이므로 inQueue=true snapshot 으로 통일한다.
@@ -28,15 +28,16 @@ public class MatchingEventPublisher {
         QueueStateV2Response queueState = new QueueStateV2Response(
                 true, queueKey.category(), queueKey.difficulty().name(), waitingCount, REQUIRED_MATCH_SIZE);
 
-        messagingTemplate.convertAndSend(
+        // queue 공용 이벤트는 Redis pub/sub을 거쳐 각 서버가 같은 topic으로 fan-out 한다.
+        webSocketMessagePublisher.publish(
                 toQueueTopic(queueKey),
                 new MatchingEventResponse(MatchingEventType.QUEUE_STATE_CHANGED, queueState, null));
     }
 
     public void publishReadyCheckStarted(Long userId, MatchStateV2Response matchState) {
         log.info("READY_CHECK_STARTED 발행 - userId={}, destination={}", userId, USER_MATCHING_DESTINATION);
-        messagingTemplate.convertAndSendToUser(
-                String.valueOf(userId),
+        webSocketMessagePublisher.publishToUser(
+                userId,
                 USER_MATCHING_DESTINATION,
                 new MatchingEventResponse(MatchingEventType.READY_CHECK_STARTED, null, matchState));
     }
@@ -68,7 +69,8 @@ public class MatchingEventPublisher {
 
     private void publishUserMatchEvent(Long userId, MatchingEventType type, MatchStateV2Response matchState) {
         log.info("{} 발행 - userId={}, destination={}", type, userId, USER_MATCHING_DESTINATION);
-        messagingTemplate.convertAndSendToUser(
-                String.valueOf(userId), USER_MATCHING_DESTINATION, new MatchingEventResponse(type, null, matchState));
+        // 개인 matching 이벤트도 Redis pub/sub으로 중계한 뒤, 각 서버가 해당 user 세션에만 전달한다.
+        webSocketMessagePublisher.publishToUser(
+                userId, USER_MATCHING_DESTINATION, new MatchingEventResponse(type, null, matchState));
     }
 }

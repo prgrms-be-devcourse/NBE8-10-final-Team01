@@ -7,7 +7,6 @@ import static org.mockito.Mockito.verify;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 
 import com.back.domain.matching.queue.dto.MatchStateV2Response;
 import com.back.domain.matching.queue.dto.MatchStatus;
@@ -15,11 +14,12 @@ import com.back.domain.matching.queue.dto.MatchingEventResponse;
 import com.back.domain.matching.queue.dto.MatchingEventType;
 import com.back.domain.matching.queue.model.Difficulty;
 import com.back.domain.matching.queue.model.QueueKey;
+import com.back.global.websocket.pubsub.WebSocketMessagePublisher;
 
 class MatchingEventPublisherTest {
 
-    private final SimpMessagingTemplate messagingTemplate = mock(SimpMessagingTemplate.class);
-    private final MatchingEventPublisher matchingEventPublisher = new MatchingEventPublisher(messagingTemplate);
+    private final WebSocketMessagePublisher webSocketMessagePublisher = mock(WebSocketMessagePublisher.class);
+    private final MatchingEventPublisher matchingEventPublisher = new MatchingEventPublisher(webSocketMessagePublisher);
 
     @Test
     @DisplayName("queue 상태 변화는 category/difficulty 기준 topic 으로 발행된다")
@@ -30,7 +30,7 @@ class MatchingEventPublisherTest {
 
         matchingEventPublisher.publishQueueStateChanged(queueKey, 3);
 
-        verify(messagingTemplate).convertAndSend(destinationCaptor.capture(), eventCaptor.capture());
+        verify(webSocketMessagePublisher).publish(destinationCaptor.capture(), eventCaptor.capture());
 
         assertThat(destinationCaptor.getValue()).isEqualTo("/topic/matching/queue/ARRAY/EASY");
         assertThat(eventCaptor.getValue().type()).isEqualTo(MatchingEventType.QUEUE_STATE_CHANGED);
@@ -44,16 +44,16 @@ class MatchingEventPublisherTest {
     @DisplayName("ready-check 시작 이벤트는 사용자별 matching 채널로 발행된다")
     void publishReadyCheckStarted_usesUserDestination() {
         MatchStateV2Response matchState = new MatchStateV2Response(MatchStatus.ACCEPT_PENDING, null, null, null);
-        ArgumentCaptor<String> userCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Long> userCaptor = ArgumentCaptor.forClass(Long.class);
         ArgumentCaptor<String> destinationCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<MatchingEventResponse> eventCaptor = ArgumentCaptor.forClass(MatchingEventResponse.class);
 
         matchingEventPublisher.publishReadyCheckStarted(1L, matchState);
 
-        verify(messagingTemplate)
-                .convertAndSendToUser(userCaptor.capture(), destinationCaptor.capture(), eventCaptor.capture());
+        verify(webSocketMessagePublisher)
+                .publishToUser(userCaptor.capture(), destinationCaptor.capture(), eventCaptor.capture());
 
-        assertThat(userCaptor.getValue()).isEqualTo("1");
+        assertThat(userCaptor.getValue()).isEqualTo(1L);
         assertThat(destinationCaptor.getValue()).isEqualTo("/queue/matching");
         assertThat(eventCaptor.getValue().type()).isEqualTo(MatchingEventType.READY_CHECK_STARTED);
         assertThat(eventCaptor.getValue().queue()).isNull();
@@ -87,16 +87,16 @@ class MatchingEventPublisherTest {
 
     private void assertUserEvent(Long userId, MatchingEventType eventType, UserEventPublisherAction publisherAction) {
         MatchStateV2Response matchState = new MatchStateV2Response(MatchStatus.ACCEPT_PENDING, null, null, null);
-        ArgumentCaptor<String> userCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Long> userCaptor = ArgumentCaptor.forClass(Long.class);
         ArgumentCaptor<String> destinationCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<MatchingEventResponse> eventCaptor = ArgumentCaptor.forClass(MatchingEventResponse.class);
 
         publisherAction.publish(userId, matchState);
 
-        verify(messagingTemplate)
-                .convertAndSendToUser(userCaptor.capture(), destinationCaptor.capture(), eventCaptor.capture());
+        verify(webSocketMessagePublisher)
+                .publishToUser(userCaptor.capture(), destinationCaptor.capture(), eventCaptor.capture());
 
-        assertThat(userCaptor.getValue()).isEqualTo(String.valueOf(userId));
+        assertThat(userCaptor.getValue()).isEqualTo(userId);
         assertThat(destinationCaptor.getValue()).isEqualTo("/queue/matching");
         assertThat(eventCaptor.getValue().type()).isEqualTo(eventType);
         assertThat(eventCaptor.getValue().queue()).isNull();
