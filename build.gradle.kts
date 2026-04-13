@@ -130,7 +130,7 @@ dependencies {
     testImplementation("org.testcontainers:testcontainers")
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
 
-    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.5.0")
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.6")
 }
 
 tasks.withType<Test> {

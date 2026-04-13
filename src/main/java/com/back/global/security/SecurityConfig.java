@@ -54,7 +54,11 @@ public class SecurityConfig {
                                 "/actuator/metrics",
                                 "/actuator/metrics/**",
                                 "/actuator/prometheus",
-                                "/error")
+                                "/error",
+                                // Swagger UI
+                                "/swagger-ui/**",
+                                "/swagger-ui.html",
+                                "/v3/api-docs/**")
                         .permitAll()
                         // 관리자 API는 ROLE_ADMIN만 접근 허용
                         .requestMatchers("/api/v1/admin/**")
