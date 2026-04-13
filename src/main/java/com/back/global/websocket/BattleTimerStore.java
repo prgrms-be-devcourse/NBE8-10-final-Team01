@@ -17,7 +17,7 @@ import lombok.RequiredArgsConstructor;
  * battle:timer:queue  ZSET → List  — Redisson DelayedQueue 내부 저장소
  *
  * BattleReconnectStore(grace period)와 동일한 패턴:
- * - BattleReconnectStore : memberId → 15초 후 PARTICIPANT_LEFT
+ * - BattleReconnectStore : memberId → 15초 후 PARTICIPANT_STATUS_CHANGED(ABANDONED)
  * - BattleTimerStore     : roomId  → 30분 후 settle()
  *
  * 기존 BattleScheduler(폴링)와의 역할 분담:

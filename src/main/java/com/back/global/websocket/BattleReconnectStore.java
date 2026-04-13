@@ -27,6 +27,7 @@ import lombok.RequiredArgsConstructor;
  * RDelayedQueue (ZSET) - offer 시 score = 지금+15초 로 저장
  *   ↓ 15초 후 Redisson 내부 폴링(100ms)이 이동
  * RBlockingQueue (List) - GracePeriodConsumer.take()가 꺼냄
+ *
  */
 @Component
 @RequiredArgsConstructor
@@ -60,8 +61,8 @@ public class BattleReconnectStore {
      * 타이밍에 따라 메시지가 ZSET 또는 List에 있을 수 있으므로 양쪽 모두 제거 시도한다.
      */
     public void cancelGracePeriod(Long memberId) {
-        delayedQueue().remove(memberId.toString()); // ZSET에 있으면 제거 (offer 직후 ~ 14.9s)
-        blockingQueue().remove(memberId.toString()); // 이미 List로 이동했으면 거기서도 제거 (15s ~ take() 전)
+        delayedQueue().remove(memberId.toString());
+        blockingQueue().remove(memberId.toString());
     }
 
     /**

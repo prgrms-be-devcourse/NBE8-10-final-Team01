@@ -1,7 +1,6 @@
 package com.back.global.websocket;
 
 import java.security.Principal;
-import java.util.Map;
 
 import org.springframework.context.event.EventListener;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -15,7 +14,6 @@ import com.back.domain.battle.battleparticipant.entity.BattleParticipantStatus;
 import com.back.domain.battle.battleparticipant.repository.BattleParticipantRepository;
 import com.back.domain.battle.battleroom.entity.BattleRoomStatus;
 import com.back.global.security.SecurityUser;
-import com.back.global.websocket.pubsub.WebSocketMessagePublisher;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -27,7 +25,6 @@ public class BattleDisconnectHandler {
 
     private final BattleParticipantRepository battleParticipantRepository;
     private final BattleReconnectStore reconnectStore;
-    private final WebSocketMessagePublisher publisher;
 
     /**
      * WebSocket 연결이 끊길 때 Spring이 자동으로 발생시키는 이벤트 처리.
@@ -65,18 +62,9 @@ public class BattleDisconnectHandler {
                     TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                         @Override
                         public void afterCommit() {
-                            publisher.publish(
-                                    "/topic/room/" + roomId,
-                                    Map.of(
-                                            "type",
-                                            "PARTICIPANT_STATUS_CHANGED",
-                                            "userId",
-                                            memberId,
-                                            "status",
-                                            BattleParticipantStatus.ABANDONED.name()));
-                            // PARTICIPANT_LEFT를 즉시 보내지 않고 15초 유예 기간 부여.
-                            // 새로고침 등 의도치 않은 끊김 시 재연결 기회를 준다.
-                            // 유예 기간 만료 후 미복귀 시 GracePeriodConsumer가 브로드캐스트.
+                            // ABANDONED를 즉시 publish하지 않고 15초 유예 기간 부여.
+                            // 재연결 시 grace를 취소하면 외부에는 아무 이벤트도 가지 않는다.
+                            // 유예 기간 만료 후 미복귀 시 GracePeriodConsumer가 PARTICIPANT_STATUS_CHANGED(ABANDONED) 발행.
                             reconnectStore.startGracePeriod(memberId);
                         }
                     });
