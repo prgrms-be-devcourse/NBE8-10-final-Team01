@@ -21,7 +21,9 @@ class TagControllerTest {
     @Test
     @DisplayName("태그 컨트롤러는 서비스 결과를 그대로 반환한다")
     void getTags_returnsServiceResult() {
-        List<TagResponse> response = List.of(new TagResponse("array", "array"), new TagResponse("graph", "graph"));
+        List<TagResponse> response = List.of(
+                new TagResponse("array", "array", List.of("EASY")),
+                new TagResponse("graph", "graph", List.of("MEDIUM", "HARD")));
 
         when(tagService.getTags()).thenReturn(response);
 

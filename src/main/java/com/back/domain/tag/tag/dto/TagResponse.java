@@ -1,3 +1,5 @@
 package com.back.domain.tag.tag.dto;
 
-public record TagResponse(String code, String label) {}
+import java.util.List;
+
+public record TagResponse(String code, String label, List<String> difficulties) {}
