@@ -20,8 +20,7 @@ public interface TagRepository extends JpaRepository<Tag, Long> {
 
     Optional<Tag> findByName(String name);
 
-    @Query(
-            """
+    @Query("""
             select t.name as tagName, p.difficulty as difficulty
             from ProblemTagConnect ptc
             join ptc.tag t
