@@ -3,6 +3,7 @@ package com.back.global.judge;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -162,7 +163,7 @@ class JudgeServiceTest {
 
         judgeService.onJudgeRequested(event(List.of(tc)));
 
-        verify(battleAcService, never()).handleAc(any(), any());
+        verify(battleAcService, never()).handleAc(any(), any(), any());
     }
 
     @Test
@@ -173,7 +174,7 @@ class JudgeServiceTest {
 
         judgeService.onJudgeRequested(event(List.of(tc)));
 
-        verify(battleAcService).handleAc(ROOM_ID, MEMBER_ID);
+        verify(battleAcService).handleAc(eq(ROOM_ID), eq(MEMBER_ID), isNull());
     }
 
     @Test
