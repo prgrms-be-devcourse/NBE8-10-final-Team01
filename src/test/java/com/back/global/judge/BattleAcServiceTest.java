@@ -10,6 +10,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -64,9 +65,11 @@ class BattleAcServiceTest {
                 .thenReturn(Optional.of(participant));
         when(battleParticipantRepository.findByBattleRoom(room)).thenReturn(List.of(participant, solvedOther));
 
-        withAfterCommit(() -> battleAcService.handleAc(ROOM_ID, MEMBER_ID));
+        LocalDateTime submittedAt = LocalDateTime.now();
+        withAfterCommit(() -> battleAcService.handleAc(ROOM_ID, MEMBER_ID, submittedAt));
 
         assertThat(participant.getStatus()).isEqualTo(BattleParticipantStatus.SOLVED);
+        assertThat(participant.getFinishTime()).isEqualTo(submittedAt);
         verify(battleParticipantRepository).save(participant);
         verify(publisher, times(2)).publish(eq("/topic/room/" + ROOM_ID), any());
         verify(publisher)
@@ -103,7 +106,7 @@ class BattleAcServiceTest {
                 .thenReturn(Optional.of(participant));
         when(battleParticipantRepository.findByBattleRoom(room)).thenReturn(List.of(participant, quitOther));
 
-        withAfterCommit(() -> battleAcService.handleAc(ROOM_ID, MEMBER_ID));
+        withAfterCommit(() -> battleAcService.handleAc(ROOM_ID, MEMBER_ID, LocalDateTime.now()));
 
         verify(eventPublisher).publishEvent(new BattleSettlementRequestedEvent(ROOM_ID));
     }
@@ -126,7 +129,7 @@ class BattleAcServiceTest {
                 .thenReturn(Optional.of(participant));
         when(battleParticipantRepository.findByBattleRoom(room)).thenReturn(List.of(participant, abandonedOther));
 
-        withAfterCommit(() -> battleAcService.handleAc(ROOM_ID, MEMBER_ID));
+        withAfterCommit(() -> battleAcService.handleAc(ROOM_ID, MEMBER_ID, LocalDateTime.now()));
 
         verify(eventPublisher, never()).publishEvent(any(BattleSettlementRequestedEvent.class));
     }

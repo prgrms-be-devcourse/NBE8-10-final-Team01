@@ -32,7 +32,9 @@ import com.back.domain.battle.battleroom.entity.BattleRoomStatus;
 import com.back.domain.battle.battleroom.repository.BattleRoomRepository;
 import com.back.domain.battle.result.dto.ActiveRoomResponse;
 import com.back.domain.battle.result.dto.MyBattleResultsResponse;
+import com.back.domain.member.member.entity.Member;
 import com.back.domain.problem.problem.entity.Problem;
+import com.back.domain.problem.submission.entity.SubmissionResult;
 import com.back.domain.problem.submission.repository.SubmissionRepository;
 import com.back.domain.rating.profile.service.RatingProfileService;
 import com.back.global.exception.ServiceException;
@@ -219,6 +221,239 @@ class BattleResultServiceTest {
         withAfterCommit(() -> battleResultService.settle(2L));
 
         verify(participant).applyResult(1, -10L);
+    }
+
+    // -----------------------------------------------------------------------
+    // 순위 산정 공정성 테스트
+    // calcScore = 배틀 시작부터 finishTime까지의 초 + WA 횟수 * 20초 패널티
+    // 미통과(TIMEOUT/ABANDONED/QUIT) 참여자는 Long.MAX_VALUE → 항상 AC 뒤
+    // 동점이면 finishTime 빠른 사람이 앞 순위
+    // -----------------------------------------------------------------------
+
+    @Test
+    @DisplayName("AC 참여자는 미통과 참여자보다 앞 순위를 받는다")
+    void settle_acRanksBeforeNonAc() {
+        BattleRoom room = mock(BattleRoom.class);
+        Problem problem = mock(Problem.class);
+        Member memberA = mock(Member.class);
+        Member memberB = mock(Member.class);
+        BattleParticipant participantA = mock(BattleParticipant.class);
+        BattleParticipant participantB = mock(BattleParticipant.class);
+
+        LocalDateTime startedAt = LocalDateTime.of(2026, 1, 1, 10, 0, 0);
+
+        when(battleRoomRepository.findById(1L)).thenReturn(Optional.of(room));
+        when(room.getStatus()).thenReturn(BattleRoomStatus.PLAYING);
+        when(room.getProblem()).thenReturn(problem);
+        when(room.getStartedAt()).thenReturn(startedAt);
+        when(problem.getDifficultyRating()).thenReturn(1200);
+        when(battleParticipantRepository.findByBattleRoom(room)).thenReturn(List.of(participantA, participantB));
+
+        when(participantA.getId()).thenReturn(1L);
+        when(participantA.getStatus()).thenReturn(BattleParticipantStatus.SOLVED);
+        when(participantA.getFinishTime()).thenReturn(startedAt.plusMinutes(10));
+        when(participantA.getMember()).thenReturn(memberA);
+        when(memberA.getId()).thenReturn(101L);
+
+        when(participantB.getId()).thenReturn(2L);
+        when(participantB.getStatus()).thenReturn(BattleParticipantStatus.TIMEOUT);
+        when(participantB.getMember()).thenReturn(memberB);
+        when(memberB.getId()).thenReturn(102L);
+
+        when(submissionRepository.countByBattleRoomAndMemberAndResultAndCreatedAtBefore(
+                        eq(room), eq(memberA), eq(SubmissionResult.WA), any()))
+                .thenReturn(0L);
+        when(ratingProfileService.applyBattlePlacements(any(), eq(1200))).thenReturn(Map.of());
+
+        withAfterCommit(() -> battleResultService.settle(1L));
+
+        verify(participantA).applyResult(1, 0L);
+        verify(participantB).applyResult(2, 0L);
+    }
+
+    @Test
+    @DisplayName("AC 참여자 간에는 finishTime 빠른 순으로 순위를 받는다")
+    void settle_earlierFinishTimeWinsAmongAc() {
+        BattleRoom room = mock(BattleRoom.class);
+        Problem problem = mock(Problem.class);
+        Member memberA = mock(Member.class);
+        Member memberB = mock(Member.class);
+        BattleParticipant participantA = mock(BattleParticipant.class); // 15분 - 늦게 풀음
+        BattleParticipant participantB = mock(BattleParticipant.class); // 10분 - 먼저 풀음
+
+        LocalDateTime startedAt = LocalDateTime.of(2026, 1, 1, 10, 0, 0);
+
+        when(battleRoomRepository.findById(1L)).thenReturn(Optional.of(room));
+        when(room.getStatus()).thenReturn(BattleRoomStatus.PLAYING);
+        when(room.getProblem()).thenReturn(problem);
+        when(room.getStartedAt()).thenReturn(startedAt);
+        when(problem.getDifficultyRating()).thenReturn(1200);
+        when(battleParticipantRepository.findByBattleRoom(room)).thenReturn(List.of(participantA, participantB));
+
+        when(participantA.getId()).thenReturn(1L);
+        when(participantA.getStatus()).thenReturn(BattleParticipantStatus.SOLVED);
+        when(participantA.getFinishTime()).thenReturn(startedAt.plusMinutes(15)); // score = 900
+        when(participantA.getMember()).thenReturn(memberA);
+        when(memberA.getId()).thenReturn(101L);
+
+        when(participantB.getId()).thenReturn(2L);
+        when(participantB.getStatus()).thenReturn(BattleParticipantStatus.SOLVED);
+        when(participantB.getFinishTime()).thenReturn(startedAt.plusMinutes(10)); // score = 600
+        when(participantB.getMember()).thenReturn(memberB);
+        when(memberB.getId()).thenReturn(102L);
+
+        when(submissionRepository.countByBattleRoomAndMemberAndResultAndCreatedAtBefore(
+                        eq(room), any(), eq(SubmissionResult.WA), any()))
+                .thenReturn(0L);
+        when(ratingProfileService.applyBattlePlacements(any(), eq(1200))).thenReturn(Map.of());
+
+        withAfterCommit(() -> battleResultService.settle(1L));
+
+        verify(participantB).applyResult(1, 0L); // 10분 → 1등
+        verify(participantA).applyResult(2, 0L); // 15분 → 2등
+    }
+
+    @Test
+    @DisplayName("WA 패널티(1회당 20초)가 score에 반영되어 순위가 바뀐다")
+    void settle_waPenaltyAppliedToScore() {
+        BattleRoom room = mock(BattleRoom.class);
+        Problem problem = mock(Problem.class);
+        Member memberA = mock(Member.class);
+        Member memberB = mock(Member.class);
+        BattleParticipant participantA = mock(BattleParticipant.class); // 9분 + WA 1회 = 540 + 20 = 560초
+        BattleParticipant participantB = mock(BattleParticipant.class); // 10분 + WA 0회 = 600초
+
+        LocalDateTime startedAt = LocalDateTime.of(2026, 1, 1, 10, 0, 0);
+        LocalDateTime finishA = startedAt.plusSeconds(540); // 9분
+        LocalDateTime finishB = startedAt.plusSeconds(600); // 10분
+
+        when(battleRoomRepository.findById(1L)).thenReturn(Optional.of(room));
+        when(room.getStatus()).thenReturn(BattleRoomStatus.PLAYING);
+        when(room.getProblem()).thenReturn(problem);
+        when(room.getStartedAt()).thenReturn(startedAt);
+        when(problem.getDifficultyRating()).thenReturn(1200);
+        when(battleParticipantRepository.findByBattleRoom(room)).thenReturn(List.of(participantA, participantB));
+
+        when(participantA.getId()).thenReturn(1L);
+        when(participantA.getStatus()).thenReturn(BattleParticipantStatus.SOLVED);
+        when(participantA.getFinishTime()).thenReturn(finishA);
+        when(participantA.getMember()).thenReturn(memberA);
+        when(memberA.getId()).thenReturn(101L);
+
+        when(participantB.getId()).thenReturn(2L);
+        when(participantB.getStatus()).thenReturn(BattleParticipantStatus.SOLVED);
+        when(participantB.getFinishTime()).thenReturn(finishB);
+        when(participantB.getMember()).thenReturn(memberB);
+        when(memberB.getId()).thenReturn(102L);
+
+        // A: WA 1회 → score = 540 + 20 = 560
+        when(submissionRepository.countByBattleRoomAndMemberAndResultAndCreatedAtBefore(
+                        eq(room), eq(memberA), eq(SubmissionResult.WA), eq(finishA)))
+                .thenReturn(1L);
+        // B: WA 0회 → score = 600
+        when(submissionRepository.countByBattleRoomAndMemberAndResultAndCreatedAtBefore(
+                        eq(room), eq(memberB), eq(SubmissionResult.WA), eq(finishB)))
+                .thenReturn(0L);
+        when(ratingProfileService.applyBattlePlacements(any(), eq(1200))).thenReturn(Map.of());
+
+        withAfterCommit(() -> battleResultService.settle(1L));
+
+        verify(participantA).applyResult(1, 0L); // 560초 → 1등
+        verify(participantB).applyResult(2, 0L); // 600초 → 2등
+    }
+
+    @Test
+    @DisplayName("WA 패널티가 누적되면 더 빨리 푼 사람도 순위가 밀릴 수 있다")
+    void settle_heavyWaPenaltyCanFlipRanking() {
+        BattleRoom room = mock(BattleRoom.class);
+        Problem problem = mock(Problem.class);
+        Member memberA = mock(Member.class);
+        Member memberB = mock(Member.class);
+        BattleParticipant participantA = mock(BattleParticipant.class); // 10분 + WA 3회 = 600 + 60 = 660초
+        BattleParticipant participantB = mock(BattleParticipant.class); // 10분 50초 + WA 0회 = 650초
+
+        LocalDateTime startedAt = LocalDateTime.of(2026, 1, 1, 10, 0, 0);
+        LocalDateTime finishA = startedAt.plusSeconds(600); // 10분
+        LocalDateTime finishB = startedAt.plusSeconds(650); // 10분 50초
+
+        when(battleRoomRepository.findById(1L)).thenReturn(Optional.of(room));
+        when(room.getStatus()).thenReturn(BattleRoomStatus.PLAYING);
+        when(room.getProblem()).thenReturn(problem);
+        when(room.getStartedAt()).thenReturn(startedAt);
+        when(problem.getDifficultyRating()).thenReturn(1200);
+        when(battleParticipantRepository.findByBattleRoom(room)).thenReturn(List.of(participantA, participantB));
+
+        when(participantA.getId()).thenReturn(1L);
+        when(participantA.getStatus()).thenReturn(BattleParticipantStatus.SOLVED);
+        when(participantA.getFinishTime()).thenReturn(finishA);
+        when(participantA.getMember()).thenReturn(memberA);
+        when(memberA.getId()).thenReturn(101L);
+
+        when(participantB.getId()).thenReturn(2L);
+        when(participantB.getStatus()).thenReturn(BattleParticipantStatus.SOLVED);
+        when(participantB.getFinishTime()).thenReturn(finishB);
+        when(participantB.getMember()).thenReturn(memberB);
+        when(memberB.getId()).thenReturn(102L);
+
+        // A: WA 3회 → score = 600 + 60 = 660
+        when(submissionRepository.countByBattleRoomAndMemberAndResultAndCreatedAtBefore(
+                        eq(room), eq(memberA), eq(SubmissionResult.WA), eq(finishA)))
+                .thenReturn(3L);
+        // B: WA 0회 → score = 650
+        when(submissionRepository.countByBattleRoomAndMemberAndResultAndCreatedAtBefore(
+                        eq(room), eq(memberB), eq(SubmissionResult.WA), eq(finishB)))
+                .thenReturn(0L);
+        when(ratingProfileService.applyBattlePlacements(any(), eq(1200))).thenReturn(Map.of());
+
+        withAfterCommit(() -> battleResultService.settle(1L));
+
+        verify(participantB).applyResult(1, 0L); // 650초 → 1등
+        verify(participantA).applyResult(2, 0L); // 660초 → 2등
+    }
+
+    @Test
+    @DisplayName("score가 같으면 finishTime이 빠른 참여자가 앞 순위를 받는다")
+    void settle_tieScoreBreaksByFinishTime() {
+        BattleRoom room = mock(BattleRoom.class);
+        Problem problem = mock(Problem.class);
+        Member memberA = mock(Member.class);
+        Member memberB = mock(Member.class);
+        BattleParticipant participantA = mock(BattleParticipant.class);
+        BattleParticipant participantB = mock(BattleParticipant.class);
+
+        LocalDateTime startedAt = LocalDateTime.of(2026, 1, 1, 10, 0, 0);
+        // 둘 다 정확히 600초 경과 → elapsedSeconds 동일, finishTime 차이로 순위 결정
+        LocalDateTime finishA = startedAt.plusSeconds(600);
+        LocalDateTime finishB = startedAt.plusSeconds(600).plusNanos(500_000_000); // 0.5초 늦음
+
+        when(battleRoomRepository.findById(1L)).thenReturn(Optional.of(room));
+        when(room.getStatus()).thenReturn(BattleRoomStatus.PLAYING);
+        when(room.getProblem()).thenReturn(problem);
+        when(room.getStartedAt()).thenReturn(startedAt);
+        when(problem.getDifficultyRating()).thenReturn(1200);
+        when(battleParticipantRepository.findByBattleRoom(room)).thenReturn(List.of(participantA, participantB));
+
+        when(participantA.getId()).thenReturn(1L);
+        when(participantA.getStatus()).thenReturn(BattleParticipantStatus.SOLVED);
+        when(participantA.getFinishTime()).thenReturn(finishA);
+        when(participantA.getMember()).thenReturn(memberA);
+        when(memberA.getId()).thenReturn(101L);
+
+        when(participantB.getId()).thenReturn(2L);
+        when(participantB.getStatus()).thenReturn(BattleParticipantStatus.SOLVED);
+        when(participantB.getFinishTime()).thenReturn(finishB);
+        when(participantB.getMember()).thenReturn(memberB);
+        when(memberB.getId()).thenReturn(102L);
+
+        when(submissionRepository.countByBattleRoomAndMemberAndResultAndCreatedAtBefore(
+                        eq(room), any(), eq(SubmissionResult.WA), any()))
+                .thenReturn(0L);
+        when(ratingProfileService.applyBattlePlacements(any(), eq(1200))).thenReturn(Map.of());
+
+        withAfterCommit(() -> battleResultService.settle(1L));
+
+        verify(participantA).applyResult(1, 0L); // finishTime 빠름 → 1등
+        verify(participantB).applyResult(2, 0L); // finishTime 0.5초 늦음 → 2등
     }
 
     private void withAfterCommit(Runnable action) {
