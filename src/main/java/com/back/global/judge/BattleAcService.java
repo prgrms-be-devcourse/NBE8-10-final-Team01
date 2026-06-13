@@ -33,7 +33,7 @@ public class BattleAcService {
     private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
-    public void handleAc(Long roomId, Long memberId) {
+    public void handleAc(Long roomId, Long memberId, LocalDateTime submittedAt) {
         BattleRoom room = battleRoomRepository
                 .findById(roomId)
                 .orElseThrow(() -> new IllegalStateException("BattleRoom not found: " + roomId));
@@ -45,7 +45,7 @@ public class BattleAcService {
                 .findByBattleRoomAndMember(room, member)
                 .orElseThrow(() -> new IllegalStateException("Participant not found"));
 
-        participant.complete(LocalDateTime.now());
+        participant.complete(submittedAt);
         battleParticipantRepository.save(participant);
 
         List<BattleParticipant> allParticipants = battleParticipantRepository.findByBattleRoom(room);

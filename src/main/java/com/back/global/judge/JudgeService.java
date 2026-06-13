@@ -91,7 +91,7 @@ public class JudgeService {
                         "totalCount", totalCount));
 
         if (judgeResult == SubmissionResult.AC) {
-            battleAcService.handleAc(roomId, memberId);
+            battleAcService.handleAc(roomId, memberId, submission.getCreatedAt());
         }
     }
 
